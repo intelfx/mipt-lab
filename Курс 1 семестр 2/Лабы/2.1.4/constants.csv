@@ -1,4 +1,4 @@
- Value Error
-alpha 4.28e-3 0.005e-3
-U 36.0 0.1
-I 0.30 0.01
+Value,Error
+alpha,4.28e-3,0.005e-3
+U,36.0,0.1
+I,0.30,0.01
