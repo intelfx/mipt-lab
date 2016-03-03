@@ -57,9 +57,11 @@ def fit(name, model, model_args, x, y, xerr, yerr, initial = None):
 def minmax(arg):
 	return min(arg), max(arg)
 
-def linspace(arg, ticks = 100):
+def linspace(arg, ticks = 100, pre = 0, post = 0.1):
 	min_arg, max_arg = minmax(arg)
-	return np.linspace(min_arg, max_arg + 0.1 * (max_arg - min_arg), ticks)
+	return np.linspace(min_arg - pre * (max_arg - min_arg),
+	                   max_arg + post * (max_arg - min_arg),
+	                   ticks)
 
 # computes error of given expression (symbolically) given list of its variables (to consider in the calculation)
 # returns:
