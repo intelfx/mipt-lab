@@ -29,22 +29,24 @@ def var(name, value, error):
 def var_many(names, values, errors):
 	return pd.DataFrame({ "Value": values, "Error": errors }, index = names)
 
-def fit(name, model, model_args, x, y, xerr, yerr):
+def fit(name, model, model_args, x, y, xerr, yerr, initial = None):
 	# use OLS (ordinary least squares) to find initial guesses
-	beta, cov = sp_opt.curve_fit(model,
-	                             xdata = x,
-	                             ydata = y,
-	                             sigma = yerr,
-	                             absolute_sigma = True, maxfev = 1000000)
+	if initial is None:
+		beta, cov = sp_opt.curve_fit(model,
+		                             xdata = x,
+		                             ydata = y,
+		                             sigma = yerr,
+		                             absolute_sigma = True, maxfev = int(1e6))
 
-	fit_result = var_many(names = model_args, values = beta, errors = [cov[i, i]**0.5 for i, v in enumerate(cov)])
-	print("Initial guesses for %s:" % name, fit_result)
+		fit_result = var_many(names = model_args, values = beta, errors = [cov[i, i]**0.5 for i, v in enumerate(cov)])
+		print("Initial guesses for %s:\n" % name, fit_result)
+		initial = beta
 
 	# use ODR (Deming regression) which is a special case of TLS (total least squares)
 	# to find results accounting for both X and Y uncertainties
 	odr_model = sp_odr.Model(lambda B, x: model(x, *B))
 	odr_data = sp_odr.RealData(x = x, y = y, sx = xerr, sy = yerr)
-	odr = sp_odr.ODR(odr_data, odr_model, beta0 = beta, maxit = 1000000)
+	odr = sp_odr.ODR(odr_data, odr_model, beta0 = initial, maxit = int(1e6))
 	odr_output = odr.run()
 
 	fit_result = var_many(names = model_args, values = odr_output.beta, errors = odr_output.sd_beta)
