@@ -5,6 +5,13 @@ from scipy import odr as sp_odr
 from IPython.display import display as disp
 import sympy as smp
 
+# TODO: generalize math wrappers
+def exp(x):
+	if type(x).__module__.split(".")[0] == "sympy":
+		return smp.exp(x)
+	else:
+		return np.exp(x)
+
 def varlist():
 	return pd.DataFrame(columns = ["Value", "Error"])
 
@@ -104,6 +111,8 @@ def sym_make_subs(expr_vars, expr_err_vars, data):
 # - the expression name (for logging)
 # - the expression
 # - a DataFrame in usual format with variables' data
+# TODO: autogenerate sympy symbols for function arguments (considering their names)
+#       using some kind of introspection
 def sym_compute(name, expr, data):
 	expr_vars = expr.atoms(smp.Symbol)
 	expr_err, expr_err_vars, expr_err_derivs, expr_err_e_d_sq = sym_error(expr, expr_vars)
@@ -117,6 +126,7 @@ def sym_compute(name, expr, data):
 	disp("Error influence estimations for %s:" % name, bits)
 
 	return var(name, float(expr.subs(expr_subs)), float(expr_err.subs(expr_subs)))
+
 # computes a substitution dictionary (template) for the .subs() method of the symbolic expression
 # has column names instead of values
 def sym_make_subs_cols_mapping(expr_vars, expr_err_vars, cols_mapping):
@@ -159,4 +169,5 @@ def sym_compute_column(name, expr, data, cols_mapping, cols):
 	                    in expr_subs_column ]
 
 	return expr_column, expr_err_column
+
 #  vim: set ts=8 sw=8 tw=0 noet ft=python :
