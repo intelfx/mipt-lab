@@ -155,10 +155,29 @@ def sym_make_subs_cols_mapping(expr_vars, expr_err_vars, cols_mapping):
 	var_pairs.update(err_pairs)
 	return var_pairs
 
-# data is a DataFrame common constants for all instances of the computation
-# cols_mapping is formatted as input to `var_dict`, except with column names instead of values
+# computes a substitution dictionary (template) for the .subs() method of the symbolic expression
+# has column names instead of values
+# generates default column names by convention rather than by mapping
+def sym_make_subs_cols_mapping_infer(expr_vars, expr_err_vars, cols):
+	var_pairs = { var: var.name
+	              for var
+	              in expr_vars
+	              if var.name in cols }
+	err_pairs = { err_var: "Error_%s" % var.name
+	              for var, err_var
+	              in zip(expr_vars, expr_err_vars)
+	              if "Error_%s" % var.name in cols }
+
+	var_pairs.update(err_pairs)
+	return var_pairs
+
+# data is a DataFrame with common constants for all instances of the computation
 # cols is a DataFrame with columns
-def sym_compute_column(name, expr, data, cols_mapping, cols):
+# cols_mapping is formatted as input to `var_dict`, except with column names instead of values
+#              if None, columns are matched by names (errors as Error_<var>)
+# TODO: support mixed modes where some columns are specified in cols_mapping but the remaining
+#       are inferred (e. g. common error column for multiple properly named data columns)
+def sym_compute_column(name, expr, data, cols, cols_mapping = None):
 	expr_vars = expr.atoms(smp.Symbol)
 	expr_err, expr_err_vars, expr_err_derivs, expr_err_e_d_sq = sym_error(expr, expr_vars)
 	expr_subs = sym_make_subs(expr_vars, expr_err_vars, data)
@@ -174,7 +193,15 @@ def sym_compute_column(name, expr, data, cols_mapping, cols):
 	expr = expr.subs(expr_subs)
 	expr_err = expr_err.subs(expr_subs)
 
-	expr_subs_cols_mapping = sym_make_subs_cols_mapping(expr_vars, expr_err_vars, cols_mapping)
+	if cols_mapping is not None:
+		expr_subs_cols_mapping = sym_make_subs_cols_mapping(expr_vars,
+		                                                    expr_err_vars,
+		                                                    cols_mapping)
+	else:
+		expr_subs_cols_mapping = sym_make_subs_cols_mapping_infer(expr_vars,
+		                                                          expr_err_vars,
+		                                                          cols)
+
 	expr_subs_column = [ { var: s[col_name]
 	                       for var, col_name
 	                       in expr_subs_cols_mapping.items() }
