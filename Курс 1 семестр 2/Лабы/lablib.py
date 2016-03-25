@@ -106,6 +106,14 @@ def sym_make_subs(expr_vars, expr_err_vars, data):
 	var_pairs.update(err_pairs)
 	return var_pairs
 
+def sym_compute_show_error_influences(name, data, expr_subs, expr_vars, expr_err_derivs, expr_err_e_d_sq):
+	bits = var_dict({ var.name: { "Error": data.Error[var.name] if var.name in data.Error else None,
+	                              "Derivative": deriv.subs(expr_subs),
+	                              "(E*D)^2": e_d_sq.subs(expr_subs) }
+	                  for var, deriv, e_d_sq in zip(expr_vars, expr_err_derivs, expr_err_e_d_sq) },
+	                  index = ["Error", "Derivative", "(E*D)^2"])
+	disp("Error influence estimations for %s:" % name, bits)
+
 # computes a symbolic expression along with its error from given data
 # takes:
 # - the expression name (for logging)
@@ -118,12 +126,12 @@ def sym_compute(name, expr, data):
 	expr_err, expr_err_vars, expr_err_derivs, expr_err_e_d_sq = sym_error(expr, expr_vars)
 	expr_subs = sym_make_subs(expr_vars, expr_err_vars, data)
 
-	bits = var_dict({ var.name: { "Error": data.Error[var.name],
-	                              "Derivative": deriv.subs(expr_subs),
-				      "(E*D)^2": e_d_sq.subs(expr_subs) }
-	                  for var, deriv, e_d_sq in zip(expr_vars, expr_err_derivs, expr_err_e_d_sq) },
-	                  index = ["Error", "Derivative", "(E*D)^2"])
-	disp("Error influence estimations for %s:" % name, bits)
+	sym_compute_show_error_influences(name,
+	                                  data,
+	                                  expr_subs,
+	                                  expr_vars,
+	                                  expr_err_derivs,
+	                                  expr_err_e_d_sq)
 
 	return var(name, float(expr.subs(expr_subs)), float(expr_err.subs(expr_subs)))
 
@@ -149,6 +157,13 @@ def sym_compute_column(name, expr, data, cols_mapping, cols):
 	expr_vars = expr.atoms(smp.Symbol)
 	expr_err, expr_err_vars, expr_err_derivs, expr_err_e_d_sq = sym_error(expr, expr_vars)
 	expr_subs = sym_make_subs(expr_vars, expr_err_vars, data)
+
+	sym_compute_show_error_influences(name,
+	                                  data,
+	                                  expr_subs,
+	                                  expr_vars,
+	                                  expr_err_derivs,
+	                                  expr_err_e_d_sq)
 
 	# pre-substitute constants
 	expr = expr.subs(expr_subs)
