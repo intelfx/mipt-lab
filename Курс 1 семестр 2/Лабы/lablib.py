@@ -45,7 +45,12 @@ def fit(name, model, model_args, x, y, xerr, yerr, initial = None):
 		                             sigma = yerr,
 		                             absolute_sigma = True, maxfev = int(1e6))
 
-		fit_result = var_many(names = model_args, values = beta, errors = [cov[i, i]**0.5 for i, v in enumerate(cov)])
+		fit_result = var_many(names = model_args,
+		                      values = beta,
+		                      errors = [ cov[i, i]**0.5
+		                                 for i, v
+		                                 in enumerate(cov) ])
+
 		print("Initial guesses for %s:\n" % name, fit_result)
 		initial = beta
 
@@ -81,7 +86,7 @@ def sym_error(expr, expr_vars):
 	expr_err_e_d_sq = []
 	expr_err_derivs = []
 	for var in expr_vars:
-		err_var = smp.symbols("error_%s" % var.name)
+		err_var = smp.symbols("Error_%s" % var.name)
 		err_deriv = smp.diff(expr, var)
 		expr_err_vars += [err_var]
 		expr_err_derivs += [err_deriv]
