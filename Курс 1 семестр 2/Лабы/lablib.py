@@ -4,6 +4,7 @@ from scipy import optimize as sp_opt
 from scipy import odr as sp_odr
 from IPython.display import display as disp
 import sympy as smp
+import inspect
 
 # TODO: generalize math wrappers
 def exp(x):
@@ -216,5 +217,154 @@ def sym_compute_column(name, expr, data, cols, cols_mapping = None):
 	                    in expr_subs_column ]
 
 	return expr_column, expr_err_column
+
+def castable_to_float(arg):
+	try:
+		arg = float(arg)
+		return True
+	except:
+		return False
+
+# computes a substitution dictionary for the .subs() method of the symbolic expression
+# takes:
+# - list of variables to substitute
+# - list of variables representing errors of given variables to substitute
+# - a dictionary formatted as input to var_dict() (items which are not numbers are ignored)
+def sym_make_subs_aux(expr_vars, expr_err_vars, aux):
+	var_pairs = { var: aux[var.name]["Value"]
+	              for var
+	              in expr_vars
+	              if var.name in aux
+	              and "Value" in aux[var.name]
+	              and castable_to_float(aux[var.name]["Value"]) }
+
+	err_pairs = { err_var: aux[var.name]["Error"]
+	              for var, err_var
+	              in zip(expr_vars, expr_err_vars)
+	              if var.name in aux
+	              and "Error" in aux[var.name]
+	              and castable_to_float(aux[var.name]["Error"]) }
+
+	var_pairs.update(err_pairs)
+	return var_pairs
+
+def castable_to_iter(arg):
+	try:
+		arg = iter(arg)
+		return True
+	except:
+		return False
+
+# computes a substitution dictionary template for the .subs() method of the symbolic expression
+# (with column references instead of values)
+# takes:
+# - list of variables to substitute
+# - list of variables representing errors of given variables to substitute
+# - a dictionary formatted as input to var_dict() (items which are not numbers are ignored)
+def sym_make_subs_cols_meta(expr_vars, expr_err_vars, cols, aux):
+	# first, find columns with matching names
+	var_pairs_inferred = sym_make_subs_cols_mapping_infer(expr_vars, expr_err_vars, cols)
+	if aux is None:
+		return var_pairs_inferred
+
+	# then build substitutions for column references in aux
+	var_pairs = { var: aux[var.name]["Value"]
+	              for var
+	              in expr_vars
+	              if var.name in aux
+	              and "Value" in aux[var.name]
+	              and isinstance(aux[var.name]["Value"], str)
+		      and aux[var.name]["Value"] in cols }
+
+	err_pairs = { err_var: aux[var.name]["Error"]
+	              for var, err_var
+	              in zip(expr_vars, expr_err_vars)
+	              if var.name in aux
+	              and "Error" in aux[var.name]
+	              and isinstance(aux[var.name]["Error"], str)
+		      and aux[var.name]["Error"] in cols }
+
+	var_pairs.update(err_pairs)
+
+	# then merge everything, prioritising explicit statements
+	var_pairs_inferred.update(var_pairs)
+	return var_pairs_inferred
+
+# This is the new general interface for computing data along with its error from given dataset.
+# Takes:
+# - name: the output variable name
+# - expr: sympy expression or a function
+#         NB: if expr is a function, then its argument names are significant;
+#             they should match column and variable names in the dataset
+# - data: a varlist DataFrame which is to be used for all instances of the computation
+# - cols: a "columns" DataFrame which is to be substituted row-by-row
+# - aux: a dict, formatted as input to var_dict(), which can contain either immediate values
+#        (which are then substituted like values from data) or strings referring to columns
+#        from cols, forming a mapping from expression's variables (and their errors) to columns
+#
+# Returns:
+# - the sympified expression (valuable if a function is passed, but the expression is needed afterwards)
+# - its variables
+# - its error variables, in the same order
+#
+# The default name for error columns (in absence of mapping) is "Error_<var>".
+def compute(name, expr, data, cols, aux = None):
+	if type(expr).__name__ == "function":
+		expr_fn = expr
+		expr_args = list(inspect.signature(expr_fn).parameters.keys())
+		expr_vars = smp.symbols(expr_args)
+		expr = expr_fn(*expr_vars)
+	else:
+		expr_vars = expr.atoms(smp.Symbol)
+
+	expr_err, expr_err_vars, expr_err_derivs, expr_err_e_d_sq = sym_error(expr, expr_vars)
+
+	# front check if we have enough data
+	for v in expr_vars:
+		if not (v.name in data.Value or
+		        v.name in cols or
+			(aux is not None and v.name in aux and "Value" in aux[v.name])):
+			raise IndexError("Variable %s does not exist in dataset" % v.name)
+
+		if not (v.name in data.Error or
+		        "Error_%s" % v.name in cols or
+			(aux is not None and v.name in aux and "Error" in aux[v.name])):
+			raise IndexError("Error for variable %s does not exist in dataset" % v.name)
+
+	# build substitutions from data
+	expr_subs = sym_make_subs(expr_vars, expr_err_vars, data)
+
+	# build substitutions from immediate values in cols_mapping
+	if aux is not None:
+		expr_subs_aux = sym_make_subs_aux(expr_vars, expr_err_vars, aux)
+		expr_subs.update(expr_subs_aux)
+
+	# pre-substitute constants
+	expr = expr.subs(expr_subs)
+	expr_err = expr_err.subs(expr_subs)
+
+	# build substitution template from columns and column references in cols_mapping
+	expr_subs_cols = sym_make_subs_cols_meta(expr_vars, expr_err_vars, cols, aux)
+
+	if expr_subs_cols:
+		expr_subs_rows = [ { var: row[col_name]
+		                     for var, col_name
+		                     in expr_subs_cols.items() }
+		                   for i, row
+		                   in cols.iterrows() ]
+
+		expr_rows = [ float(expr.subs(data))
+		              for data
+		              in expr_subs_rows ]
+		expr_err_rows = [ float(expr_err.subs(data))
+		                  for data
+		                  in expr_subs_rows ]
+
+		cols[name] = expr_rows
+		cols["Error_%s" % name] = expr_err_rows
+	else:
+		add(data, var(name, float(expr), float(expr_err)))
+
+	return expr, expr_vars, expr_err_vars
 
 #  vim: set ts=8 sw=8 tw=0 noet ft=python :
