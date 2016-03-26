@@ -67,6 +67,13 @@ def fit(name, model, model_args, x, y, xerr, yerr, initial = None):
 
 	return fit_result
 
+def fit2(name, model, x, y, xerr, yerr, data, initial = None):
+	model_args = list(inspect.signature(model).parameters.keys())[1:]
+	result = fit(name, model, model_args, x, y, xerr, yerr, initial)
+	add(data, result)
+
+	return lambda x: model(x, *[data.Value[a] for a in model_args])
+
 def minmax(arg):
 	return min(arg), max(arg)
 
