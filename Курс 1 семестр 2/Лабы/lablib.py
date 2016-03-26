@@ -308,7 +308,7 @@ def sym_make_subs_cols_meta(expr_vars, expr_err_vars, cols, aux):
 # - its error variables, in the same order
 #
 # The default name for error columns (in absence of mapping) is "Error_<var>".
-def compute(name, expr, data, cols, aux = None):
+def compute(name, expr, data, columns, aux = None):
 	if type(expr).__name__ == "function":
 		expr_fn = expr
 		expr_args = list(inspect.signature(expr_fn).parameters.keys())
@@ -322,12 +322,12 @@ def compute(name, expr, data, cols, aux = None):
 	# front check if we have enough data
 	for v in expr_vars:
 		if not (v.name in data.Value or
-		        v.name in cols or
+		        v.name in columns or
 			(aux is not None and v.name in aux and "Value" in aux[v.name])):
 			raise IndexError("Variable %s does not exist in dataset" % v.name)
 
 		if not (v.name in data.Error or
-		        "Error_%s" % v.name in cols or
+		        "Error_%s" % v.name in columns or
 			(aux is not None and v.name in aux and "Error" in aux[v.name])):
 			raise IndexError("Error for variable %s does not exist in dataset" % v.name)
 
@@ -344,14 +344,14 @@ def compute(name, expr, data, cols, aux = None):
 	expr_err = expr_err.subs(expr_subs)
 
 	# build substitution template from columns and column references in cols_mapping
-	expr_subs_cols = sym_make_subs_cols_meta(expr_vars, expr_err_vars, cols, aux)
+	expr_subs_cols = sym_make_subs_cols_meta(expr_vars, expr_err_vars, columns, aux)
 
 	if expr_subs_cols:
 		expr_subs_rows = [ { var: row[col_name]
 		                     for var, col_name
 		                     in expr_subs_cols.items() }
 		                   for i, row
-		                   in cols.iterrows() ]
+		                   in columns.iterrows() ]
 
 		expr_rows = [ float(expr.subs(data))
 		              for data
@@ -360,8 +360,8 @@ def compute(name, expr, data, cols, aux = None):
 		                  for data
 		                  in expr_subs_rows ]
 
-		cols[name] = expr_rows
-		cols["Error_%s" % name] = expr_err_rows
+		columns[name] = expr_rows
+		columns["Error_%s" % name] = expr_err_rows
 	else:
 		add(data, var(name, float(expr), float(expr_err)))
 
