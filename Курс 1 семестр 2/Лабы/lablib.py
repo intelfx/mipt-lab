@@ -13,6 +13,12 @@ def exp(x):
 	else:
 		return np.exp(x)
 
+def log(x):
+	if type(x).__module__.split(".")[0] == "sympy":
+		return smp.log(x)
+	else:
+		return np.log(x)
+
 def varlist():
 	return pd.DataFrame(columns = ["Value", "Error"])
 
