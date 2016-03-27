@@ -5,6 +5,12 @@ from scipy import odr as sp_odr
 from IPython.display import display as disp
 import sympy as smp
 import inspect
+import os
+
+try:
+	from natsort import natsorted
+except ImportError:
+	pass
 
 # TODO: generalize math wrappers
 def exp(x):
@@ -42,6 +48,40 @@ def var(name, value, error):
 
 def var_many(names, values, errors):
 	return pd.DataFrame({ "Value": values, "Error": errors }, index = names)
+
+def read_standard_layout():
+	data = {}
+	columns = {}
+
+	try:
+		constants = read_csv("constants.csv")
+	except OSError:
+		pass
+
+	for f in os.listdir("constants"):
+		if f.endswith(".csv"):
+			e = f[:-4]
+			data[e] = read_csv(os.path.join("constants", f))
+
+	for f in os.listdir("measurements"):
+		if f.endswith(".csv"):
+			e = f[:-4]
+			columns[e] = read_csv(os.path.join("measurements", f))
+
+	for e in columns.keys():
+		d = varlist()
+		if 'constants' in locals():
+			add(d, constants)
+		if e in data:
+			add(d, data[e])
+		data[e] = d
+
+	if 'natsorted' in globals():
+		experiments = natsorted(columns.keys())
+	else:
+		experiments = sorted(columns.keys())
+
+	return data, columns, experiments
 
 def fit(name, model, model_args, x, y, xerr, yerr, initial = None):
 	# use OLS (ordinary least squares) to find initial guesses
