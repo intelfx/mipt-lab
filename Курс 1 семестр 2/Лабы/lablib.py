@@ -76,6 +76,12 @@ def read_standard_layout():
 			add(d, data[e])
 		data[e] = d
 
+	# also add "global" varlist with only the global constants
+	d = varlist()
+	if 'constants' in locals():
+		add(d, constants)
+	data["global"] = d
+
 	if 'natsorted' in globals():
 		experiments = natsorted(columns.keys())
 	else:
@@ -315,6 +321,9 @@ def castable_to_iter(arg):
 # - list of variables representing errors of given variables to substitute
 # - a dictionary formatted as input to var_dict() (items which are not numbers are ignored)
 def sym_make_subs_cols_meta(expr_vars, expr_err_vars, cols, aux):
+	if cols is None:
+		return {}
+
 	# first, find columns with matching names
 	var_pairs_inferred = sym_make_subs_cols_mapping_infer(expr_vars, expr_err_vars, cols)
 	if aux is None:
@@ -361,7 +370,7 @@ def sym_make_subs_cols_meta(expr_vars, expr_err_vars, cols, aux):
 # - its error variables, in the same order
 #
 # The default name for error columns (in absence of mapping) is "Error_<var>".
-def compute(name, expr, data, columns, aux = None):
+def compute(name, expr, data, columns = None, aux = None):
 	if type(expr).__name__ == "function":
 		expr_fn = expr
 		expr_args = list(inspect.signature(expr_fn).parameters.keys())
