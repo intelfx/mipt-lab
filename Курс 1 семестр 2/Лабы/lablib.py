@@ -374,7 +374,7 @@ def sym_make_subs_cols_meta(expr_vars, expr_err_vars, cols, aux):
 # - its error variables, in the same order
 #
 # The default name for error columns (in absence of mapping) is "Error_<var>".
-def compute(name, expr, data, columns = None, aux = None):
+def compute(name, expr, data, columns = None, aux = None, debug = False):
 	if type(expr).__name__ == "function":
 		expr_fn = expr
 		expr_args = list(inspect.signature(expr_fn).parameters.keys())
@@ -399,6 +399,14 @@ def compute(name, expr, data, columns = None, aux = None):
 
 	# build substitutions from data
 	expr_subs = sym_make_subs(expr_vars, expr_err_vars, data)
+
+	if debug:
+		sym_compute_show_error_influences(name,
+		                                  data,
+		                                  expr_subs,
+		                                  expr_vars,
+		                                  expr_err_derivs,
+		                                  expr_err_e_d_sq)
 
 	# build substitutions from immediate values in cols_mapping
 	if aux is not None:
