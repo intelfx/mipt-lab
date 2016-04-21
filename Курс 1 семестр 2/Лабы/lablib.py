@@ -26,7 +26,7 @@ def log(x):
 		return np.log(x)
 
 def varlist():
-	return pd.DataFrame(columns = ["Value", "Error"])
+	return pd.DataFrame(columns = ["Value", "Error", "ErrorRel"])
 
 def add(where, *args):
 	for arg in args:
@@ -44,10 +44,14 @@ def var_dict(dct, **kwargs):
 	return pd.DataFrame(dct, **kwargs).T
 
 def var(name, value, error):
-	return var_dict({ name: { "Value": value, "Error": error } })
+	return var_dict({ name: { "Value": value, "Error": error, "ErrorRel": error / value } })
 
 def var_many(names, values, errors):
-	return pd.DataFrame({ "Value": values, "Error": errors }, index = names)
+	return pd.DataFrame({ "Value": values,
+	                      "Error": errors,
+	                      "ErrorRel": [e/v for e, v in zip(errors, values)] },
+	                    columns = ["Value", "Error", "ErrorRel"],
+	                    index = names)
 
 def read_standard_layout():
 	data = {}
@@ -176,7 +180,7 @@ def sym_compute_show_error_influences(name, data, expr_subs, expr_vars, expr_err
 	                              "Derivative": deriv.subs(expr_subs),
 	                              "(E*D)^2": e_d_sq.subs(expr_subs) }
 	                  for var, deriv, e_d_sq in zip(expr_vars, expr_err_derivs, expr_err_e_d_sq) },
-	                  index = ["Error", "Derivative", "(E*D)^2"])
+	                index = ["Error", "Derivative", "(E*D)^2"])
 	disp("Error influence estimations for %s:" % name, bits)
 
 # computes a symbolic expression along with its error from given data
