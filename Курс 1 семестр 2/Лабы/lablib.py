@@ -25,6 +25,10 @@ def log(x):
 	else:
 		return np.log(x)
 
+g = 9.80665 # m/s^2
+torr = 133.3224 # Pa
+R = 8.314472
+
 def varlist(*args, **kwargs):
 	df = pd.DataFrame(*args, **kwargs, columns = ["Value", "Error", "ErrorRel"])
 	return df
