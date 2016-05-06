@@ -12,6 +12,8 @@ try:
 except ImportError:
 	pass
 
+pd.set_option("float_format", "{:f}".format)
+
 # TODO: generalize math wrappers
 def exp(x):
 	if type(x).__module__.split(".")[0] == "sympy":
@@ -29,8 +31,19 @@ g = 9.80665 # m/s^2
 torr = 133.3224 # Pa
 R = 8.314472
 
+def make_formatter(fmt_func, fmt_map):
+	return lambda *args, **kwargs: fmt_func(formatters = fmt_map, *args, **kwargs)
+
+def set_formatters(df, formatters):
+	df.to_html = make_formatter(df.to_html, formatters)
+
+varlist_formatters = {
+	"ErrorRel": "{:.2%}".format
+}
+
 def varlist(*args, **kwargs):
 	df = pd.DataFrame(*args, **kwargs, columns = ["Value", "Error", "ErrorRel"])
+	set_formatters(df, varlist_formatters)
 	return df
 
 def add(where, *args):
@@ -43,9 +56,39 @@ def add_multi(targets, *args):
 		add(where, *args)
 
 def read_csv(name):
-	return pd.read_csv(name)
+	csv = pd.read_csv(name)
+	if "Value" in csv.columns and \
+	   "Error" in csv.columns:
+		# compute ErrorRel for a varlist
+		csv["ErrorRel"] = csv["Error"] / csv["Value"]
+		# set percentage format for the ErrorRel
+		set_formatters(csv, varlist_formatters)
+	else:
+		# compute relative error columns for all matching pairs
+		relerr_cols = []
 
+		for err_col in csv.columns:
+			# check if this is an error column, check if we have pair
+			if not err_col.startswith("Error_"):
+				continue
+			var_col = err_col[6:]
+			if not var_col in csv.columns:
+				continue
+			relerr_col = "ErrorRel_%s" % var_col
 
+			# insert the new column after the error column
+			csv.insert(list(csv.columns).index(err_col) + 1,
+			           relerr_col,
+			           csv[err_col] / csv[var_col])
+
+			# save its name
+			relerr_cols.append(relerr_col)
+
+		# set percentage format for all these columns
+		set_formatters(csv, { k: varlist_formatters["ErrorRel"]
+		                      for k in relerr_cols })
+
+	return csv
 
 def var_many(names, values, errors):
 	return varlist({ "Value": values,
