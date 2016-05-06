@@ -25,8 +25,9 @@ def log(x):
 	else:
 		return np.log(x)
 
-def varlist():
-	return pd.DataFrame(columns = ["Value", "Error", "ErrorRel"])
+def varlist(*args, **kwargs):
+	df = pd.DataFrame(*args, **kwargs, columns = ["Value", "Error", "ErrorRel"])
+	return df
 
 def add(where, *args):
 	for arg in args:
@@ -40,18 +41,17 @@ def add_multi(targets, *args):
 def read_csv(name):
 	return pd.read_csv(name)
 
-def var_dict(dct, **kwargs):
-	return pd.DataFrame(dct, **kwargs).T
 
-def var(name, value, error):
-	return var_dict({ name: { "Value": value, "Error": error, "ErrorRel": error / value } })
 
 def var_many(names, values, errors):
-	return pd.DataFrame({ "Value": values,
-	                      "Error": errors,
-	                      "ErrorRel": [e/v for e, v in zip(errors, values)] },
-	                    columns = ["Value", "Error", "ErrorRel"],
-	                    index = names)
+	return varlist({ "Value": values,
+	                 "Error": errors,
+	                 "ErrorRel": [e/v for e, v in zip(errors, values)] },
+	               index = names)
+
+def var(name, value, error):
+	return var_many([name], [value], [error])
+
 def maybe_read_csv(name):
 	try:
 		return read_csv(name)
@@ -183,11 +183,11 @@ def sym_make_subs(expr_vars, expr_err_vars, data):
 	return var_pairs
 
 def sym_compute_show_error_influences(name, data, expr_subs, expr_vars, expr_err_derivs, expr_err_e_d_sq):
-	bits = var_dict({ var.name: { "Error": data.Error[var.name] if var.name in data.Error else None,
-	                              "Derivative": deriv.subs(expr_subs),
-	                              "(E*D)^2": e_d_sq.subs(expr_subs) }
-	                  for var, deriv, e_d_sq in zip(expr_vars, expr_err_derivs, expr_err_e_d_sq) },
-	                index = ["Error", "Derivative", "(E*D)^2"])
+	bits = pd.DataFrame({ var.name: { "Error": data.Error[var.name] if var.name in data.Error else None,
+	                                  "Derivative": deriv.subs(expr_subs),
+	                                  "(E*D)^2": e_d_sq.subs(expr_subs) }
+	                      for var, deriv, e_d_sq in zip(expr_vars, expr_err_derivs, expr_err_e_d_sq) },
+	                     index = ["Error", "Derivative", "(E*D)^2"]).T
 
 	bits = bits.sort_values("(E*D)^2", ascending=False)
 
@@ -251,7 +251,7 @@ def sym_make_subs_cols_mapping_infer(expr_vars, expr_err_vars, cols):
 
 # data is a DataFrame with common constants for all instances of the computation
 # cols is a DataFrame with columns
-# cols_mapping is formatted as input to `var_dict`, except with column names instead of values
+# cols_mapping is formatted as a dictionary of dict[<var>]["Error", "Value"] = <column name>
 #              if None, columns are matched by names (errors as Error_<var>)
 # TODO: support mixed modes where some columns are specified in cols_mapping but the remaining
 #       are inferred (e. g. common error column for multiple properly named data columns)
