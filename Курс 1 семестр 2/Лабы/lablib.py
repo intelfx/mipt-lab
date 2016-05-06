@@ -381,10 +381,11 @@ def sym_make_subs_cols_meta(expr_vars, expr_err_vars, cols, aux):
 # - its error variables, in the same order
 #
 # The default name for error columns (in absence of mapping) is "Error_<var>".
-def compute(name, expr, data, columns = None, aux = None, debug = False):
+def compute(name, expr, data, columns = None, aux = None, debug = False, expr_args = None):
 	if type(expr).__name__ == "function":
 		expr_fn = expr
-		expr_args = list(inspect.signature(expr_fn).parameters.keys())
+		if expr_args is None:
+			expr_args = list(inspect.signature(expr_fn).parameters.keys())
 		expr_vars = smp.symbols(expr_args)
 		expr = expr_fn(*expr_vars)
 	else:
