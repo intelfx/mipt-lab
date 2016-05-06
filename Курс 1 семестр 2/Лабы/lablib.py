@@ -52,38 +52,45 @@ def var_many(names, values, errors):
 	                      "ErrorRel": [e/v for e, v in zip(errors, values)] },
 	                    columns = ["Value", "Error", "ErrorRel"],
 	                    index = names)
+def maybe_read_csv(name):
+	try:
+		return read_csv(name)
+	except OSError:
+		return varlist()
 
-def read_standard_layout():
-	data = {}
-	columns = {}
+def maybe_read_csv_dir(name):
+	ret = {}
 
 	try:
-		constants = read_csv("constants.csv")
+		filelist = os.listdir(name)
 	except OSError:
-		pass
+		return ret
 
-	for f in os.listdir("constants"):
+	for f in filelist:
 		if f.endswith(".csv"):
 			e = f[:-4]
-			data[e] = read_csv(os.path.join("constants", f))
+			ret[e] = read_csv(os.path.join(name, f))
 
-	for f in os.listdir("measurements"):
-		if f.endswith(".csv"):
-			e = f[:-4]
-			columns[e] = read_csv(os.path.join("measurements", f))
+	return ret
 
-	for e in columns.keys():
+def read_standard_layout():
+	constants = maybe_read_csv("constants.csv")
+	data = maybe_read_csv_dir("constants")
+	columns = maybe_read_csv_dir("measurements")
+
+	for e in set(list(columns.keys()) + list(data.keys())):
 		d = varlist()
-		if 'constants' in locals():
-			add(d, constants)
+		add(d, constants)
 		if e in data:
 			add(d, data[e])
 		data[e] = d
 
+		if not e in columns:
+			columns[e] = pd.DataFrame()
+
 	# also add "global" varlist with only the global constants
 	d = varlist()
-	if 'constants' in locals():
-		add(d, constants)
+	add(d, constants)
 	data["global"] = d
 
 	if 'natsorted' in globals():
