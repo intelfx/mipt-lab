@@ -181,7 +181,14 @@ def sym_compute_show_error_influences(name, data, expr_subs, expr_vars, expr_err
 	                              "(E*D)^2": e_d_sq.subs(expr_subs) }
 	                  for var, deriv, e_d_sq in zip(expr_vars, expr_err_derivs, expr_err_e_d_sq) },
 	                index = ["Error", "Derivative", "(E*D)^2"])
-	disp("Error influence estimations for %s:" % name, bits)
+
+	bits = bits.sort_values("(E*D)^2", ascending=False)
+
+	if name:
+		print("Error influence estimations for %s:" % name)
+	else:
+		print("Error influence estimations:")
+	disp(bits)
 
 # computes a symbolic expression along with its error from given data
 # takes:
@@ -400,14 +407,6 @@ def compute(name, expr, data, columns = None, aux = None, debug = False):
 	# build substitutions from data
 	expr_subs = sym_make_subs(expr_vars, expr_err_vars, data)
 
-	if debug:
-		sym_compute_show_error_influences(name,
-		                                  data,
-		                                  expr_subs,
-		                                  expr_vars,
-		                                  expr_err_derivs,
-		                                  expr_err_e_d_sq)
-
 	# build substitutions from immediate values in cols_mapping
 	if aux is not None:
 		expr_subs_aux = sym_make_subs_aux(expr_vars, expr_err_vars, aux)
@@ -420,6 +419,22 @@ def compute(name, expr, data, columns = None, aux = None, debug = False):
 	# build substitution template from columns and column references in cols_mapping
 	expr_subs_cols = sym_make_subs_cols_meta(expr_vars, expr_err_vars, columns, aux)
 
+	# show some verbose information
+	if debug:
+		if expr_subs_cols:
+			print("Computing row of %s" % name)
+		else:
+			print("Computing variable %s" % name)
+
+		sym_compute_show_error_influences(None,
+		                                  data,
+		                                  expr_subs,
+		                                  expr_vars,
+		                                  expr_err_derivs,
+		                                  expr_err_e_d_sq)
+
+	# if any variables are given in the form of columns, then we are computing
+	# a column, otherwise -- a single variable
 	if expr_subs_cols:
 		expr_subs_rows = [ { var: row[col_name]
 		                     for var, col_name
@@ -434,10 +449,19 @@ def compute(name, expr, data, columns = None, aux = None, debug = False):
 		                  for data
 		                  in expr_subs_rows ]
 
+		if debug:
+			print("(Not displaying column '%s' of N=%d rows)" % (name, len(expr_rows)))
+
 		columns[name] = expr_rows
 		columns["Error_%s" % name] = expr_err_rows
 	else:
-		add(data, var(name, float(expr), float(expr_err)))
+		expr_out = var(name, float(expr), float(expr_err))
+
+		if debug:
+			print("Result:")
+			disp(expr_out)
+
+		add(data, expr_out)
 
 	return expr, expr_vars, expr_err_vars
 
