@@ -31,11 +31,43 @@ g = 9.80665 # m/s^2
 torr = 133.3224 # Pa
 R = 8.314472
 
+# creates a formatter function wrapper for a given underlying function
+# which will pass a given object as "formatters" to the underlying function
+# (aka partial bind in C++).
 def make_formatter(fmt_func, fmt_map):
 	return lambda *args, **kwargs: fmt_func(formatters = fmt_map, *args, **kwargs)
 
+# wrap formatter function @fmt_func_name in @obj to pass @fmt_map as "formatters".
+# repeated applications are supported, new @fmt_map is merged into previous.
+def set_formatter(obj, fmt_func_name, fmt_map):
+
+	# get un-wrapped formatter function, previously stored by us in "_orig_%s" field,
+	# or store it there right now (if this is first invocation on an object)
+	orig_fmt_func_name = "_orig_%s" % fmt_func_name
+	orig_fmt_func = obj.__dict__.get(orig_fmt_func_name)
+
+	try:
+		orig_fmt_func = obj.__getattr__(orig_fmt_func_name)
+	except AttributeError:
+		orig_fmt_func = obj.__getattr__(fmt_func_name)
+		obj.__setattr__(orig_fmt_func_name, orig_fmt_func)
+
+	# get previous formatters map, previously stored by us in "_fmt_map" field,
+	# update it with new values and store it back there
+	orig_fmt_map_name = "_fmt_map"
+	try:
+		orig_fmt_map = obj.__getattr__(orig_fmt_map_name)
+		orig_fmt_map.update(fmt_map)
+	except AttributeError:
+		orig_fmt_map = fmt_map
+	obj.__setattr__(orig_fmt_map_name, orig_fmt_map)
+
+	# finally, make a formatter wrapper
+	fmt_func = make_formatter(orig_fmt_func, orig_fmt_map)
+	obj.__setattr__(fmt_func_name, fmt_func)
+
 def set_formatters(df, formatters):
-	df.to_html = make_formatter(df.to_html, formatters)
+	set_formatter(df, "to_html", formatters)
 
 varlist_formatters = {
 	"ErrorRel": "{:.2%}".format
@@ -509,6 +541,10 @@ def compute(name, expr, data, columns = None, aux = None, debug = False, expr_ar
 
 		columns[name] = expr_rows
 		columns["Error_%s" % name] = expr_err_rows
+		columns["ErrorRel_%s" % name] = [ e/v for e, v in zip(expr_err_rows, expr_rows) ]
+
+		set_formatters(columns, { ("ErrorRel_%s" % name): varlist_formatters["ErrorRel"] })
+
 	else:
 		expr_out = var(name, float(expr), float(expr_err))
 
