@@ -28,6 +28,7 @@ def log(x):
 		return np.log(x)
 
 g = 9.80665 # m/s^2
+k = 1.3806485279 * 10**(-23) # J/K
 torr = 133.3224 # Pa
 R = 8.314472
 
@@ -179,14 +180,21 @@ def read_standard_layout():
 
 	return data, columns, experiments
 
-def fit(name, model, model_args, x, y, xerr, yerr, initial = None):
+def fit(name, model, model_args, x, y, xerr, yerr, initial = None, prefit = False, noop = False):
+	if noop:
+		return var_many(names = model_args,
+				values = initial if initial is not None else [0 for x in model_args],
+				errors = [0 for x in model_args])
+
 	# use OLS (ordinary least squares) to find initial guesses
-	if initial is None:
+	if prefit or initial is None:
 		beta, cov = sp_opt.curve_fit(model,
 		                             xdata = x,
 		                             ydata = y,
 		                             sigma = yerr,
-		                             absolute_sigma = True, maxfev = int(1e6))
+		                             absolute_sigma = True,
+		                             maxfev = int(1e6),
+		                             p0 = initial)
 
 		fit_result = var_many(names = model_args,
 		                      values = beta,
@@ -209,9 +217,9 @@ def fit(name, model, model_args, x, y, xerr, yerr, initial = None):
 
 	return fit_result
 
-def fit2(name, model, x, y, xerr, yerr, data, initial = None):
+def fit2(name, model, x, y, xerr, yerr, data, initial = None, **kwargs):
 	model_args = list(inspect.signature(model).parameters.keys())[1:]
-	result = fit(name, model, model_args, x, y, xerr, yerr, initial)
+	result = fit(name, model, model_args, x, y, xerr, yerr, initial, **kwargs)
 	add(data, result)
 
 	return lambda x: model(x, *[data.Value[a] for a in model_args])
