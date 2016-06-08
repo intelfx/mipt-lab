@@ -75,6 +75,27 @@ varlist_formatters = {
 	"ErrorRel": "{:.2%}".format
 }
 
+def add_column(where, name, values, errors):
+	err_name = "Error_%s" % name
+	relerr_name = "ErrorRel_%s" % name
+
+	where[name] = values
+	where[err_name] = errors
+	where[relerr_name] = where[err_name] / where[name]
+
+	set_formatters(where, { relerr_name: varlist_formatters["ErrorRel"] })
+
+def make_column(where, name, varlists, indices = None):
+	if indices is not None:
+		sources = [varlists[i] for i in indices]
+	else:
+		sources = varlists
+
+	add_column(where = where,
+		   name = name,
+		   values = [v.Value[name] for v in sources],
+		   errors = [v.Error[name] for v in sources])
+
 def varlist(*args, **kwargs):
 	df = pd.DataFrame(*args, **kwargs, columns = ["Value", "Error", "ErrorRel"])
 	set_formatters(df, varlist_formatters)
@@ -551,11 +572,10 @@ def compute(name, expr, data, columns = None, aux = None, debug = False, expr_ar
 		if debug:
 			print("(Not displaying column '%s' of N=%d rows)" % (name, len(expr_rows)))
 
-		columns[name] = expr_rows
-		columns["Error_%s" % name] = expr_err_rows
-		columns["ErrorRel_%s" % name] = [ e/v for e, v in zip(expr_err_rows, expr_rows) ]
-
-		set_formatters(columns, { ("ErrorRel_%s" % name): varlist_formatters["ErrorRel"] })
+		add_column(columns,
+		           name = name,
+		           values = expr_rows,
+		           errors = expr_err_rows)
 
 	else:
 		expr_out = var(name, float(expr), float(expr_err))
