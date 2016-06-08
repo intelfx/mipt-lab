@@ -31,6 +31,7 @@ g = 9.80665 # m/s^2
 k = 1.3806485279 * 10**(-23) # J/K
 torr = 133.3224 # Pa
 R = 8.314472
+at = 98066.5 # Pa
 
 # creates a formatter function wrapper for a given underlying function
 # which will pass a given object as "formatters" to the underlying function
