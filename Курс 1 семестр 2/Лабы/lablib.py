@@ -159,7 +159,14 @@ def read_standard_layout():
 	data = maybe_read_csv_dir("constants")
 	columns = maybe_read_csv_dir("measurements")
 
-	for e in set(list(columns.keys()) + list(data.keys())):
+	experiments = set(list(columns.keys()) + list(data.keys()))
+
+	if 'natsorted' in globals():
+		experiments = natsorted(experiments)
+	else:
+		experiments = sorted(experiments)
+
+	for e in experiments:
 		d = varlist()
 		add(d, constants)
 		if e in data:
@@ -173,11 +180,7 @@ def read_standard_layout():
 	d = varlist()
 	add(d, constants)
 	data["global"] = d
-
-	if 'natsorted' in globals():
-		experiments = natsorted(columns.keys())
-	else:
-		experiments = sorted(columns.keys())
+	columns["global"] = pd.DataFrame()
 
 	return data, columns, experiments
 
