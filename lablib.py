@@ -301,7 +301,11 @@ def sym_compute_show_error_influences(name, data, expr_subs, expr_vars, expr_err
 	                      for var, deriv, e_d_sq in zip(expr_vars, expr_err_derivs, expr_err_e_d_sq) },
 	                     index = ["Error", "Derivative", "(E*D)^2"]).T
 
-	bits = bits.sort_values("(E*D)^2", ascending=False)
+	# try to sort error influences (if any variables are unresolved, this will fail)
+	try:
+		bits = bits.sort_values("(E*D)^2", ascending=False)
+	except:
+		pass
 
 	if name:
 		print("Error influence estimations for %s:" % name)
