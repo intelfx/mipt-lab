@@ -7,12 +7,26 @@ import sympy as smp
 import inspect
 import os
 
+#
+# Use `natsort` module, if present, to sort experiment names
+# This will yield "4" - "5" - "41" instead of "4" - "41" - "5"
+#
+
 try:
 	from natsort import natsorted
 except ImportError:
 	pass
 
-pd.set_option("float_format", "{:f}".format)
+
+#
+# Math function wrappers for sympy
+#
+# This allows to use the same expression both for symbolic differentiation and for fitting/plotting:
+# - smp.* variants accept symbolic variable objects (used inside compute to differentiate the expression),
+# - np.* variants accept arrays (e. g. linspace)).
+#
+# Using a wrapper allows to use the same lambda both to compute a column with errors and to plot a fitted curve.
+#
 
 # TODO: generalize math wrappers
 def exp(x):
@@ -27,22 +41,38 @@ def log(x):
 	else:
 		return np.log(x)
 
+
+#
+# Physical constants
+#
+
 g = 9.80665 # m/s^2
 k = 1.3806485279 * 10**(-23) # J/K
 torr = 133.3224 # Pa
 R = 8.314472
 at = 98066.5 # Pa
 
+
+#
+# INTERNALS: pandas formatter magic
+#
+# Used to make disp() automatically show relative errors in percent notation.
+# Works by monkey-patching to_html() method of pandas objects because pandas
+# lacks a way to set default formatters globally for all objects.
+#
+
+# configure pandas to use fixed-point formatting for floats (e. g. with disp())
+pd.set_option("float_format", "{:f}".format)
+
 # creates a formatter function wrapper for a given underlying function
 # which will pass a given object as "formatters" to the underlying function
 # (aka partial bind in C++).
-def make_formatter(fmt_func, fmt_map):
+def __make_formatter(fmt_func, fmt_map):
 	return lambda *args, **kwargs: fmt_func(formatters = fmt_map, *args, **kwargs)
 
 # wrap formatter function @fmt_func_name in @obj to pass @fmt_map as "formatters".
 # repeated applications are supported, new @fmt_map is merged into previous.
-def set_formatter(obj, fmt_func_name, fmt_map):
-
+def __set_formatter(obj, fmt_func_name, fmt_map):
 	# get un-wrapped formatter function, previously stored by us in "_orig_%s" field,
 	# or store it there right now (if this is first invocation on an object)
 	orig_fmt_func_name = "_orig_%s" % fmt_func_name
@@ -65,16 +95,55 @@ def set_formatter(obj, fmt_func_name, fmt_map):
 	obj.__setattr__(orig_fmt_map_name, orig_fmt_map)
 
 	# finally, make a formatter wrapper
-	fmt_func = make_formatter(orig_fmt_func, orig_fmt_map)
+	fmt_func = __make_formatter(orig_fmt_func, orig_fmt_map)
 	obj.__setattr__(fmt_func_name, fmt_func)
 
-def set_formatters(df, formatters):
-	set_formatter(df, "to_html", formatters)
+# wrap relevant formatter functions in @df to pass @formatters as "formatters".
+# repeated applications are supported, new @formatters is merged into previous.
+def __set_formatters(df, formatters):
+	__set_formatter(df, "to_html", formatters)
 
-varlist_formatters = {
+# default formatters for __set_formatters in varlist objects
+__varlist_formatters = {
 	"ErrorRel": "{:.2%}".format
 }
 
+
+#
+# DataFrame manipulation
+#
+# This library uses two kinds of objects to store experimental data.
+# Both are internally pandas' DataFrames, differing only in structure.
+#
+# "Column" objects are DataFrames where each column represents a variable or
+# its experimental error, and each row represents an experimental sample
+# (e. g. set of instrument readings taken at the same time).
+# The error columns are named "Error_%s", where %s is the related variable.
+# The index is integral (i. e. rows are simply numbered from 0).
+#
+# Accessing a column (as a pandas' Series, convertible into a list):
+# object["U"], object["Error_U"], ...
+#
+# Accessing a sub-column (conversion into a list is important):
+# list(object["U"][1:4])
+#
+# "Varlist" objects are dataframes with two columns -- "Value" and "Error",
+# and each row represents a variable with its error.
+# This object is intended to store experimental constants, which are same
+# for all samples in an experiment (e. g. temperature of the working body,
+# or atmospheric pressure at the time of an experiment).
+# The index consists of variable names (i. e. rows are named after variables).
+#
+# Accessing a variable's fields:
+# object.Value["T"], object.Error["T"]
+#
+# Accessing a variable as a whole:
+# object.loc["T"]
+#
+
+# add a column by @name (str), @values (list) and @errors (list) into a "column" object at @where
+#
+# Relative errors column is calculated automatically.
 def add_column(where, name, values, errors):
 	err_name = "Error_%s" % name
 	relerr_name = "ErrorRel_%s" % name
@@ -83,8 +152,15 @@ def add_column(where, name, values, errors):
 	where[err_name] = errors
 	where[relerr_name] = where[err_name] / where[name]
 
-	set_formatters(where, { relerr_name: varlist_formatters["ErrorRel"] })
+	__set_formatters(where, { relerr_name: __varlist_formatters["ErrorRel"] })
 
+# add a column by @name (str) from variables with same @name in @varlists
+# (list of "varlist" objects) into a "column" object at @where
+#
+# As a convenience measure, @varlists can be a dict of "varlist" objects,
+# but then @indices must be a list of keys to that dict.
+#
+# It is unspecified whether relative errors column is recalculated or inherited.
 def make_column(where, name, varlists, indices = None):
 	if indices is not None:
 		sources = [varlists[i] for i in indices]
@@ -96,20 +172,60 @@ def make_column(where, name, varlists, indices = None):
 		   values = [v.Value[name] for v in sources],
 		   errors = [v.Error[name] for v in sources])
 
+# make a "varlist" object from raw arguments to pandas' DataFrame ctor;
+# use `varlist()` for an empty varlist
+#
+# Relative errors column is not calculated.
 def varlist(*args, **kwargs):
 	df = pd.DataFrame(*args, **kwargs, columns = ["Value", "Error", "ErrorRel"])
-	set_formatters(df, varlist_formatters)
+	__set_formatters(df, __varlist_formatters)
 	return df
 
+# creates a "varlist" object by variable @names (list), @values (list) and @errors (list)
+#
+# Relative errors column is calculated automatically.
+def var_many(names, values, errors):
+	return varlist({ "Value": values,
+	                 "Error": errors,
+	                 "ErrorRel": [e/v for e, v in zip(errors, values)] },
+	               index = names)
+
+# creates a "varlist" object by single variable @name, @value and @error
+#
+# Relative errors column is calculated automatically.
+def var(name, value, error):
+	return var_many([name], [value], [error])
+
+# adds multiple varlists @args to a varlist @where
 def add(where, *args):
 	for arg in args:
 		for k, v in arg.iterrows():
 			where.loc[k] = v
 
+# adds multiple varlists @args to an iterable (list) of varlists @targets
 def add_multi(targets, *args):
 	for where in targets:
 		add(where, *args)
 
+
+#
+# CSV reading
+#
+# These functions read CSV files into DataFrame objects.
+#
+# Most probably, you will use a single function `read_standard_layout()`
+# to read a typical experiment data file hierarchy.
+#
+
+# reads a CSV file @name, returning a "varlist" or "columns" object as appropriate
+#
+# For "varlist" objects, the CSV file must have columns "Value" and "Error" and
+# an unnamed first column.
+#
+# For "columns" objects, the CSV file must not parse as a "varlist" object
+# (i. e. no "Value" and "Error" columns).
+#
+# In all cases, relative errors columns are calculated automatically.
 def read_csv(name):
 	csv = pd.read_csv(name)
 	if "Value" in csv.columns and \
@@ -117,7 +233,7 @@ def read_csv(name):
 		# compute ErrorRel for a varlist
 		csv["ErrorRel"] = csv["Error"] / csv["Value"]
 		# set percentage format for the ErrorRel
-		set_formatters(csv, varlist_formatters)
+		__set_formatters(csv, __varlist_formatters)
 	else:
 		# compute relative error columns for all matching pairs
 		relerr_cols = []
@@ -140,26 +256,22 @@ def read_csv(name):
 			relerr_cols.append(relerr_col)
 
 		# set percentage format for all these columns
-		set_formatters(csv, { k: varlist_formatters["ErrorRel"]
-		                      for k in relerr_cols })
+		__set_formatters(csv, { k: __varlist_formatters["ErrorRel"]
+		                        for k in relerr_cols })
 
 	return csv
 
-def var_many(names, values, errors):
-	return varlist({ "Value": values,
-	                 "Error": errors,
-	                 "ErrorRel": [e/v for e, v in zip(errors, values)] },
-	               index = names)
-
-def var(name, value, error):
-	return var_many([name], [value], [error])
-
+# reads a CSV file @name, returning an empty "varlist" object in failure case
+#
+# NOTE: a "varlist" object is not a "columns" object.
 def maybe_read_csv(name):
 	try:
 		return read_csv(name)
 	except OSError:
 		return varlist()
 
+# reads a directory of CSV files @name, returning a dictionary of appropriate objects
+# or an empty dictionary in failure case
 def maybe_read_csv_dir(name):
 	ret = {}
 
@@ -175,6 +287,21 @@ def maybe_read_csv_dir(name):
 
 	return ret
 
+# reads a typical experiment file hierarchy at current directory
+#
+# Hierarchy:
+# ./constants.csv              global constants for all experiments
+# ./constants/                 a directory
+# ./constants/$name.csv        per-experiment constants for experiment $name
+# ./measurements/              a directory
+# ./measurements/$name.csv     per-experiment samples for experiment $name
+#
+# Return: data, columns, experiments
+# - experiments (list of str):          list of experiment names, used as keys in the below dicts
+# - columns (dict of "column" objects): [$name]: per-experiment samples of $name
+# - data (dict of "varlist" objects):   [$name]: global + per-experiment constants of $name
+#                                       ["global"]: just global constants
+#
 def read_standard_layout():
 	constants = maybe_read_csv("constants.csv")
 	data = maybe_read_csv_dir("constants")
