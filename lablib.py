@@ -219,8 +219,8 @@ def add_multi(targets, *args):
 
 # reads a CSV file @name, returning a "varlist" or "columns" object as appropriate
 #
-# For "varlist" objects, the CSV file must have columns "Value" and "Error" and
-# an unnamed first column.
+# For "varlist" objects, the CSV file must have columns "Value" and "Error" and either
+# an unnamed first column or "Name" column of variable names.
 #
 # For "columns" objects, the CSV file must not parse as a "varlist" object
 # (i. e. no "Value" and "Error" columns).
@@ -230,6 +230,12 @@ def read_csv(name):
 	csv = pd.read_csv(name)
 	if "Value" in csv.columns and \
 	   "Error" in csv.columns:
+		if "Name" in csv.columns:
+			# use Name column for index if present
+			csv.set_index("Name", drop = True, inplace = True)
+			# make the index unnamed
+			csv.index.set_names(None, inplace = True)
+
 		# compute ErrorRel for a varlist
 		csv["ErrorRel"] = csv["Error"] / csv["Value"]
 		# set percentage format for the ErrorRel
