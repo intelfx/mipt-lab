@@ -367,7 +367,7 @@ def sym_make_subs_cols_mapping_infer(expr_vars, expr_err_vars, cols):
 #              if None, columns are matched by names (errors as Error_<var>)
 # TODO: support mixed modes where some columns are specified in cols_mapping but the remaining
 #       are inferred (e. g. common error column for multiple properly named data columns)
-def sym_compute_column(name, expr, data, cols, cols_mapping = None):
+def sym_compute_column(name, expr, data, cols_mapping, cols):
 	expr_vars = expr.atoms(smp.Symbol)
 	expr_err, expr_err_vars, expr_err_derivs, expr_err_e_d_sq = sym_error(expr, expr_vars)
 	expr_subs = sym_make_subs(expr_vars, expr_err_vars, data)
