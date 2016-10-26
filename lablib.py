@@ -198,9 +198,9 @@ def make_column(where, name, varlists, indices = None):
 		sources = varlists
 
 	add_column(where = where,
-		   name = name,
-		   values = [v.Value[name] for v in sources],
-		   errors = [v.Error[name] for v in sources])
+	           name = name,
+	           values = [v.Value[name] for v in sources],
+	           errors = [v.Error[name] for v in sources])
 
 # make a "varlist" object from raw arguments to pandas' DataFrame ctor;
 # use `varlist()` for an empty varlist.
@@ -441,8 +441,8 @@ def read_standard_layout():
 def fit(name, model, model_args, x, y, xerr, yerr, initial = None, prefit = False, noop = False):
 	if noop:
 		return var_many(names = model_args,
-				values = initial if initial is not None else [0 for x in model_args],
-				errors = [0 for x in model_args])
+		                values = initial if initial is not None else [0 for x in model_args],
+		                errors = [0 for x in model_args])
 
 	# use OLS (ordinary least squares) to find initial guesses
 	if prefit or initial is None:
