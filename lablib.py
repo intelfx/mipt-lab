@@ -67,11 +67,23 @@ pd.set_option("float_format", "{:f}".format)
 # creates a formatter function wrapper for a given underlying function
 # which will pass a given object as "formatters" to the underlying function
 # (aka partial bind in C++).
+#
+# Takes:
+# - @fmt_func (callable): method to operate on, pd.DataFrame.to_html() or equivalent
+# - @fmt_map: object to pass to @formatters argument of the @fmt_func callable
+#
+# Returns:
+# - new callable
 def __make_formatter(fmt_func, fmt_map):
 	return lambda *args, **kwargs: fmt_func(formatters = fmt_map, *args, **kwargs)
 
 # wrap formatter function @fmt_func_name in @obj to pass @fmt_map as "formatters".
 # repeated applications are supported, new @fmt_map is merged into previous.
+#
+# Takes:
+# - @obj: object to operate on, pd.DataFrame or equivalent
+# - @fmt_func_name: name of method in @obj to wrap
+# - @fmt_map: object to pass to @formatters argument of the method to wrap
 def __set_formatter(obj, fmt_func_name, fmt_map):
 	# get un-wrapped formatter function, previously stored by us in "_orig_%s" field,
 	# or store it there right now (if this is first invocation on an object)
@@ -100,6 +112,10 @@ def __set_formatter(obj, fmt_func_name, fmt_map):
 
 # wrap relevant formatter functions in @df to pass @formatters as "formatters".
 # repeated applications are supported, new @formatters is merged into previous.
+#
+# Takes:
+# - @df: object to operate on, pd.DataFrame or equivalent
+# - @formatters: object to pass to @formatters argument of the formatters
 def __set_formatters(df, formatters):
 	__set_formatter(df, "to_html", formatters)
 
@@ -141,9 +157,15 @@ __varlist_formatters = {
 # object.loc["T"]
 #
 
-# add a column by @name (str), @values (list) and @errors (list) into a "column" object at @where
+# add a column by @name (str), @values (list) and @errors (list) into a "column" object at @where.
 #
 # Relative errors column is calculated automatically.
+#
+# Takes:
+# - @where ("column" pd.DataFrame): object to add column to
+# - @name (str): name of column to add
+# - @values (iterable of numbers): data column
+# - @errors (iterable of numbers): corresponding error column
 def add_column(where, name, values, errors):
 	err_name = "Error_%s" % name
 	relerr_name = "ErrorRel_%s" % name
@@ -155,12 +177,18 @@ def add_column(where, name, values, errors):
 	__set_formatters(where, { relerr_name: __varlist_formatters["ErrorRel"] })
 
 # add a column by @name (str) from variables with same @name in @varlists
-# (list of "varlist" objects) into a "column" object at @where
+# (list of "varlist" objects) into a "column" object at @where.
 #
 # As a convenience measure, @varlists can be a dict of "varlist" objects,
 # but then @indices must be a list of keys to that dict.
 #
 # It is unspecified whether relative errors column is recalculated or inherited.
+#
+# Takes:
+# - @where ("column" pd.DataFrame): object to add column to
+# - @name (str): name of column to collect/add
+# - @varlists (iterable or mapping of "varlist" pd.DataFrame): collection of varlists to make column from
+# - @indices (optional, iterable of keys to @varlists): if present, selects varlists to make column from
 def make_column(where, name, varlists, indices = None):
 	if indices is not None:
 		sources = [varlists[i] for i in indices]
@@ -173,36 +201,66 @@ def make_column(where, name, varlists, indices = None):
 		   errors = [v.Error[name] for v in sources])
 
 # make a "varlist" object from raw arguments to pandas' DataFrame ctor;
-# use `varlist()` for an empty varlist
+# use `varlist()` for an empty varlist.
 #
 # Relative errors column is not calculated.
+#
+# Takes:
+# - arguments to pd.DataFrame ctor
+#
+# Returns:
+# - "varlist" pd.DataFrame
 def varlist(*args, **kwargs):
 	df = pd.DataFrame(*args, **kwargs, columns = ["Value", "Error", "ErrorRel"])
 	__set_formatters(df, __varlist_formatters)
 	return df
 
-# creates a "varlist" object by variable @names (list), @values (list) and @errors (list)
+# creates a "varlist" object by @names (list), @values (list) and @errors (list).
 #
 # Relative errors column is calculated automatically.
+#
+# Takes:
+# - names (iterable of str): names of variables to create varlist from
+# - values (iterable of numbers): values of variables corresponding to @names
+# - errors (iterable of numbers): errors of variables corresponding to @names
+#
+# Returns:
+# - "varlist" pd.DataFrame
 def var_many(names, values, errors):
 	return varlist({ "Value": values,
 	                 "Error": errors,
 	                 "ErrorRel": [e/v for e, v in zip(errors, values)] },
 	               index = names)
 
-# creates a "varlist" object by single variable @name, @value and @error
+# creates a "varlist" object by single variable @name, @value and @error.
 #
 # Relative errors column is calculated automatically.
+#
+# Takes:
+# - name (str): name of variable to create varlist from
+# - value (number): value of variable @name
+# - error (number): error of variable @name
+#
+# Returns:
+# - "varlist" pd.DataFrame
 def var(name, value, error):
 	return var_many([name], [value], [error])
 
-# adds multiple varlists @args to a varlist @where
+# adds multiple varlists @args to a varlist @where.
+#
+# Takes:
+# - @ehere ("varlist" pd.DataFrame): object to add variables to
+# - @args (vararg of "varlist" pd.DataFrame): objects to read variables from
 def add(where, *args):
 	for arg in args:
 		for k, v in arg.iterrows():
 			where.loc[k] = v
 
-# adds multiple varlists @args to an iterable (list) of varlists @targets
+# adds multiple varlists @args to an iterable (list) of varlists @targets.
+#
+# Takes:
+# - @where (iterable of "varlist" pd.DataFrame): objects to add variables to
+# - @args (vararg of "varlist" pd.DataFrame): objects to read variables from
 def add_multi(targets, *args):
 	for where in targets:
 		add(where, *args)
@@ -217,7 +275,7 @@ def add_multi(targets, *args):
 # to read a typical experiment data file hierarchy.
 #
 
-# reads a CSV file @name, returning a "varlist" or "columns" object as appropriate
+# reads a CSV file @name, returning a "varlist" or "columns" object as appropriate.
 #
 # For "varlist" objects, the CSV file must have columns "Value" and "Error" and either
 # an unnamed first column or "Name" column of variable names.
@@ -226,6 +284,12 @@ def add_multi(targets, *args):
 # (i. e. no "Value" and "Error" columns).
 #
 # In all cases, relative errors columns are calculated automatically.
+#
+# Takes:
+# - @name (str): path to a CSV file
+#
+# Returns:
+# - "varlist" or "columns" pd.DataFrame
 def read_csv(name):
 	csv = pd.read_csv(name)
 	if "Value" in csv.columns and \
@@ -267,9 +331,15 @@ def read_csv(name):
 
 	return csv
 
-# reads a CSV file @name, returning an empty "varlist" object in failure case
+# reads a CSV file @name, returning an empty "varlist" object in failure case.
 #
 # NOTE: a "varlist" object is not a "columns" object.
+#
+# Takes:
+# - @name (str): path to a CSV file
+#
+# Returns:
+# - "varlist" or "columns" pd.DataFrame
 def maybe_read_csv(name):
 	try:
 		return read_csv(name)
@@ -277,7 +347,13 @@ def maybe_read_csv(name):
 		return varlist()
 
 # reads a directory of CSV files @name, returning a dictionary of appropriate objects
-# or an empty dictionary in failure case
+# or an empty dictionary in failure case.
+#
+# Takes:
+# - @name (str): path to a directory containing CSV files
+#
+# Returns:
+# - dictionary of "varlist" or "columns" pd.DataFrame
 def maybe_read_csv_dir(name):
 	ret = {}
 
@@ -293,7 +369,7 @@ def maybe_read_csv_dir(name):
 
 	return ret
 
-# reads a typical experiment file hierarchy at current directory
+# reads a typical experiment file hierarchy at current directory.
 #
 # Hierarchy:
 # ./constants.csv              global constants for all experiments
@@ -338,6 +414,28 @@ def read_standard_layout():
 
 	return data, columns, experiments
 
+#
+# Curve fitting
+#
+# These functions fit curves to experimental datasets using a variant
+# of the least squares method.
+#
+# The functions provide a varying level of abstraction.
+#
+
+# fit(): most basic fitting function.
+#
+# Takes:
+# - @name (str): name of the fitting session (used purely for logging)
+# - @model (callable): a callable object representing the curve: `model(x, parameters...) -> y`
+# - @model_args (list of str): names of parameters for the model
+# - @x, @y, @xerr, @yerr (iterable of float): the data and error columns
+# - @initial (list of float): initial guesses for the ODR solver
+# - @prefit (bool): whether to perform OLS pass to get initial guesses for the ODR solver
+# - @noop (bool): whether to skip fitting and return initial guess or all-zeros
+#
+# Returns:
+# - "varlist" pd.DataFrame of found parameters
 def fit(name, model, model_args, x, y, xerr, yerr, initial = None, prefit = False, noop = False):
 	if noop:
 		return var_many(names = model_args,
@@ -375,6 +473,21 @@ def fit(name, model, model_args, x, y, xerr, yerr, initial = None, prefit = Fals
 
 	return fit_result
 
+# fit2(): fitting function with introspection of model arguments.
+# The parameter names are inferred from the @model argument names (by Python runtime introspection).
+# The results (found parameters) are added to @data under corresponding names.
+#
+# Takes:
+# - @name (str): name of the fitting session (used purely for logging)
+# - @model (callable): a callable object representing the curve: `model(x, parameters...) -> y`
+# - @x, @y, @xerr, @yerr (iterable of float): the data and error columns
+# - @data ("varlist" pd.DataFrame): an object to store results to
+# - @initial (list of float): initial guesses for the ODR solver
+# - @prefit (bool): whether to perform OLS pass to get initial guesses for the ODR solver
+# - @noop (bool): whether to skip fitting and return initial guess or all-zeros
+#
+# Returns:
+# - input model callable with substituted parameters
 def fit2(name, model, x, y, xerr, yerr, data, initial = None, **kwargs):
 	model_args = list(inspect.signature(model).parameters.keys())[1:]
 	result = fit(name, model, model_args, x, y, xerr, yerr, initial, **kwargs)
@@ -382,21 +495,52 @@ def fit2(name, model, x, y, xerr, yerr, data, initial = None, **kwargs):
 
 	return lambda x: model(x, *[data.Value[a] for a in model_args])
 
+#
+# Utility functions
+#
+
+# minmax(): returns minimum and maximum of the input sequence.
 def minmax(arg):
 	return min(arg), max(arg)
 
+# linspace(): returns a np.linspace with spanning range calculated from an input sequence.
+#
+# Takes:
+# - @arg (sequence of numbers): the set to span
+# - @ticks (number): amount of evenly spaced numbers to return
+# - @pre (number): how much to span before the range
+# - @post (number): how much to span before the range
+#
+# Returns:
+# - np.linspace
 def linspace(arg, ticks = 100, pre = 0, post = 0.1):
 	min_arg, max_arg = minmax(arg)
 	return np.linspace(min_arg - pre * (max_arg - min_arg),
 	                   max_arg + post * (max_arg - min_arg),
 	                   ticks)
 
-# computes error of given expression (symbolically) given list of its variables (to consider in the calculation)
-# returns:
-# - error expression
-# - variables representing errors of given variables
-# - list of derivatives of given variables
-# - list of squared error*derivative of given variables
+
+# is_number(): checks if @arg is castable to float.
+def is_number(arg):
+	try:
+		arg = float(arg)
+		return True
+	except:
+		return False
+#
+# General form expression computation with errors (uncertainties).
+#
+
+# sym_error(): computes error of given expression (symbolically) given list of
+# its variables (to consider in the calculation).
+#
+# NOTE: internal function.
+#
+# Returns:
+# - sympy expression representing error of the expression
+# - list of sympy variables representing errors of given variables
+# - list of sympy expressions representing derivatives of given variables
+# - list of sympy expressions representing (error*derivative)^2 of given variables
 def sym_error(expr, expr_vars):
 	expr_err_vars = []
 	expr_err_e_d_sq = []
@@ -409,11 +553,17 @@ def sym_error(expr, expr_vars):
 		expr_err_e_d_sq += [(err_deriv*err_var)**2]
 	return smp.sqrt(sum(expr_err_e_d_sq)), expr_err_vars, expr_err_derivs, expr_err_e_d_sq
 
-# computes a substitution dictionary for the .subs() method of the symbolic expression
-# takes:
-# - list of variables to substitute
-# - list of variables representing errors of given variables to substitute
-# - a DataFrame in usual format with variables' data
+# computes a substitution dictionary for the .subs() method of the symbolic expression.
+#
+# NOTE: internal function
+#
+# Takes:
+# - @expr_vars (sequence of sympy variables): list of variables to substitute
+# - @expr_err_vars (sequence of sympy variables): list of variables representing errors of @expr_vars
+# - @data ("varlist" pd.DataFrame): values of the variables to substitute
+#
+# Returns:
+# - dictionary of "sympy variable -> substitution value" for all input sympy variables
 def sym_make_subs(expr_vars, expr_err_vars, data):
 	var_pairs = { var: data.Value[var.name]
 	              for var
@@ -427,6 +577,10 @@ def sym_make_subs(expr_vars, expr_err_vars, data):
 	var_pairs.update(err_pairs)
 	return var_pairs
 
+# shows (using IPython.display.display()) verbose information about errors of variables in an expression
+# and their influence.
+#
+# NOTE: internal function.
 def sym_compute_show_error_influences(name, data, expr_subs, expr_vars, expr_err_derivs, expr_err_e_d_sq):
 	bits = pd.DataFrame({ var.name: { "Error": data.Error[var.name] if var.name in data.Error else None,
 	                                  "Derivative": deriv.subs(expr_subs),
@@ -446,13 +600,9 @@ def sym_compute_show_error_influences(name, data, expr_subs, expr_vars, expr_err
 		print("Error influence estimations:")
 	disp(bits)
 
-# computes a symbolic expression along with its error from given data
-# takes:
-# - the expression name (for logging)
-# - the expression
-# - a DataFrame in usual format with variables' data
-# TODO: autogenerate sympy symbols for function arguments (considering their names)
-#       using some kind of introspection
+# computes a symbolic expression along with its error from given data.
+#
+# NOTE: obsolete function.
 def sym_compute(name, expr, data):
 	expr_vars = expr.atoms(smp.Symbol)
 	expr_err, expr_err_vars, expr_err_derivs, expr_err_e_d_sq = sym_error(expr, expr_vars)
@@ -468,7 +618,9 @@ def sym_compute(name, expr, data):
 	return var(name, float(expr.subs(expr_subs)), float(expr_err.subs(expr_subs)))
 
 # computes a substitution dictionary (template) for the .subs() method of the symbolic expression
-# has column names instead of values
+# with column names instead of values.
+#
+# NOTE: internal, obsolete function.
 def sym_make_subs_cols_mapping(expr_vars, expr_err_vars, cols_mapping):
 	var_pairs = { var: cols_mapping[var.name]["Value"]
 	              for var
@@ -483,8 +635,10 @@ def sym_make_subs_cols_mapping(expr_vars, expr_err_vars, cols_mapping):
 	return var_pairs
 
 # computes a substitution dictionary (template) for the .subs() method of the symbolic expression
-# has column names instead of values
-# generates default column names by convention rather than by mapping
+# with column names instead of values.
+# Generates default column names by convention rather than by mapping.
+#
+# NOTE: internal function.
 def sym_make_subs_cols_mapping_infer(expr_vars, expr_err_vars, cols):
 	var_pairs = { var: var.name
 	              for var
@@ -498,12 +652,14 @@ def sym_make_subs_cols_mapping_infer(expr_vars, expr_err_vars, cols):
 	var_pairs.update(err_pairs)
 	return var_pairs
 
+# computes a symbolic expression along with its error from given column of data.
+#
+# NOTE: obsolete function.
+#
 # data is a DataFrame with common constants for all instances of the computation
 # cols is a DataFrame with columns
 # cols_mapping is formatted as a dictionary of dict[<var>]["Error", "Value"] = <column name>
 #              if None, columns are matched by names (errors as Error_<var>)
-# TODO: support mixed modes where some columns are specified in cols_mapping but the remaining
-#       are inferred (e. g. common error column for multiple properly named data columns)
 def sym_compute_column(name, expr, data, cols_mapping, cols):
 	expr_vars = expr.atoms(smp.Symbol)
 	expr_err, expr_err_vars, expr_err_derivs, expr_err_e_d_sq = sym_error(expr, expr_vars)
@@ -544,49 +700,45 @@ def sym_compute_column(name, expr, data, cols_mapping, cols):
 
 	return expr_column, expr_err_column
 
-def castable_to_float(arg):
-	try:
-		arg = float(arg)
-		return True
-	except:
-		return False
-
-# computes a substitution dictionary for the .subs() method of the symbolic expression
-# takes:
-# - list of variables to substitute
-# - list of variables representing errors of given variables to substitute
-# - a dictionary formatted as input to var_dict() (items which are not numbers are ignored)
+# computes a substitution dictionary for the .subs() method of the symbolic expression.
+#
+# NOTE: internal function.
+#
+# Takes:
+# - @expr_vars (iterable of sympy variables): list of variables to substitute
+# - @expr_err_vars (iterable of sympy variables): list of variables representing errors of @expr_vars
+# - @aux (mapping of str to mapping of "Value", "Error" to number or str): values of the variables to substitute
+#                                                                          (non-numbers are ignored)
 def sym_make_subs_aux(expr_vars, expr_err_vars, aux):
 	var_pairs = { var: aux[var.name]["Value"]
 	              for var
 	              in expr_vars
 	              if var.name in aux
 	              and "Value" in aux[var.name]
-	              and castable_to_float(aux[var.name]["Value"]) }
+	              and is_number(aux[var.name]["Value"]) }
 
 	err_pairs = { err_var: aux[var.name]["Error"]
 	              for var, err_var
 	              in zip(expr_vars, expr_err_vars)
 	              if var.name in aux
 	              and "Error" in aux[var.name]
-	              and castable_to_float(aux[var.name]["Error"]) }
+	              and is_number(aux[var.name]["Error"]) }
 
 	var_pairs.update(err_pairs)
 	return var_pairs
 
-def castable_to_iter(arg):
-	try:
-		arg = iter(arg)
-		return True
-	except:
-		return False
-
 # computes a substitution dictionary template for the .subs() method of the symbolic expression
-# (with column references instead of values)
-# takes:
-# - list of variables to substitute
-# - list of variables representing errors of given variables to substitute
-# - a dictionary formatted as input to var_dict() (items which are not numbers are ignored)
+# with column names instead of values.
+# For error columns, both default names and the explicit mapping are considered.
+#
+# NOTE: internal function.
+#
+# Takes:
+# - @expr_vars (iterable of sympy variables): list of variables to substitute
+# - @expr_err_vars (iterable of sympy variables): list of variables representing errors of @expr_vars
+# - @cols ("columns" pd.DataFrame): available columns for substitution
+# - @aux (mapping of str to mapping of "Value", "Error" to number or str): column names to substitute
+#                                                                          (non-str are ignored)
 def sym_make_subs_cols_meta(expr_vars, expr_err_vars, cols, aux):
 	if cols is None:
 		return {}
@@ -620,21 +772,20 @@ def sym_make_subs_cols_meta(expr_vars, expr_err_vars, cols, aux):
 	return var_pairs_inferred
 
 # This is the new general interface for computing data along with its error from given dataset.
+#
 # Takes:
-# - name: the output variable name
-# - expr: sympy expression or a function
-#         NB: if expr is a function, then its argument names are significant;
-#             they should match column and variable names in the dataset
-# - data: a varlist DataFrame which is to be used for all instances of the computation
-# - cols: a "columns" DataFrame which is to be substituted row-by-row
-# - aux: a dict, formatted as input to var_dict(), which can contain either immediate values
-#        (which are then substituted like values from data) or strings referring to columns
-#        from cols, forming a mapping from expression's variables (and their errors) to columns
+# - @name (str): the result variable name
+# - @expr (sympy expression or callable): expression to compute
+#   (if @expr is a function, then its argument names are significant)
+# - @data ("varlist" pd.DataFrame): variables to be used for all instances of computation
+# - @cols ("columns" pd.DataFrame): variables to be substituted row-by-row
+# - @aux (mapping of str to mapping of "Value", "Error" to number or str): explicit mappings
+#   (strings mean column names)
 #
 # Returns:
 # - the sympified expression (valuable if a function is passed, but the expression is needed afterwards)
-# - its variables
-# - its error variables, in the same order
+# - list of its sympy variables
+# - list of its errors as sympy variables (in the same order)
 #
 # The default name for error columns (in absence of mapping) is "Error_<var>".
 def compute(name, expr, data, columns = None, aux = None, debug = False, expr_args = None):
