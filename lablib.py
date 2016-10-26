@@ -460,7 +460,7 @@ def fit(name, model, model_args, x, y, xerr, yerr, initial = None, prefit = Fals
 		                                 for i, v
 		                                 in enumerate(cov) ])
 
-		print("Initial guesses for %s:\n" % name, fit_result)
+		print("Initial guesses for %s:\n%s\n" % (name, fit_result))
 		initial = beta
 
 	# use ODR (Deming regression) which is a special case of TLS (total least squares)
@@ -471,7 +471,8 @@ def fit(name, model, model_args, x, y, xerr, yerr, initial = None, prefit = Fals
 	odr_output = odr.run()
 
 	fit_result = var_many(names = model_args, values = odr_output.beta, errors = odr_output.sd_beta)
-	disp("Final guesses for %s:" % name, fit_result)
+	print("Final guesses for %s:" % name)
+	disp(fit_result)
 
 	return fit_result
 
