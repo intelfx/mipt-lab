@@ -4,8 +4,10 @@ from scipy import optimize as sp_opt
 from scipy import odr as sp_odr
 from IPython.display import display as disp
 import sympy as smp
+import matplotlib.pyplot as plt
 import inspect
 import os
+import collections
 
 #
 # Use `natsort` module, if present, to sort experiment names
@@ -495,6 +497,309 @@ def fit2(name, model, x, y, xerr, yerr, data, initial = None, **kwargs):
 
 	return lambda x: model(x, *[data.Value[a] for a in model_args])
 
+
+# plotfit() implementation detail: converts input arguments to batch form, expanding singles.
+#
+# NOTE: internal function.
+#
+# Takes:
+# - multiple (argument name, argument, checker function) tuples
+#
+# Returns:
+# - a list of normalized arguments in the input order
+def plotfit_normalize_batch(*args):
+	# detect single and batched arguments as well as the batch length
+	batch_length = 1
+	batch_length_argname = None
+	batch_is_single = []
+	for name, arg, checker in args:
+		# explicitly check for valid single argument because an str is an iterable of str (incredibly)
+		if checker(arg):
+			batch_is_single += [True]
+		# only then check for valid batched argument
+		elif is_iter(arg, check0 = checker):
+			if batch_length == 1:
+				batch_length = len(arg)
+				batch_length_argname = name
+			elif batch_length != len(arg):
+				raise ValueError("plotfit: batch arguments of different length: `%s` (%d) != `%s` (%d)"
+				                 % (batch_length_argname, batch_length, name, len(arg)))
+			batch_is_single += [False]
+		else:
+			raise ValueError("Not a valid argument nor a batch thereof: `%s` == %s" % (name, repr(arg)))
+
+	# actually normalize arguments
+	batch_args = []
+	for (name, arg, checker), is_single in zip(args, batch_is_single):
+		if is_single:
+			if batch_length > 1 and (name == "data" or name == "label"):
+				print("plotfit: Warning: `%s` is not a batch -- this is probably not what you want" % name)
+			batch_args += [ [arg] * batch_length ]
+		else:
+			batch_args += [ arg ]
+
+	return batch_args
+
+# plotfit() implementation detail: converts column input arguments to the simplest "direct" form.
+#
+# NOTE: internal function.
+#
+# Takes:
+# - columns: the `columns` input argument (batch of pd.DataFrame)
+# - args: multiple (data column name, data column arg, error column name, error column arg) tuples
+#
+# Returns:
+# - list of data columns in direct form (in input order)
+# - list of corresponding error columns in direct form (in input order)
+# - list of deduced data column names (in input order)
+def plotfit_normalize_form(columns, *args):
+	direct_args = []
+	direct_errs = []
+	direct_names = []
+
+	# we'd rather use `columns` as iteration variable
+	b_columns = columns
+
+	for n_arg, b_arg, n_err, b_err in args:
+		direct_b_arg = []
+		direct_b_err = []
+		direct_b_name = []
+
+		for arg, err, columns in zip(b_arg, b_err, b_columns):
+			direct_arg = None
+			direct_err = None
+			direct_name = None
+
+			# process the data column first...
+			if is_synthesized_column(arg):
+				direct_name = arg[0].name
+				direct_arg = [obj.Value for obj in arg]
+				if err is True:
+					direct_err = [obj.Error for obj in arg]
+			elif is_symbolic_column(arg):
+				if columns is None:
+					raise ValueError("plotfit: symbolic columns (in `%s`) only allowed if 'columns' are provided"
+					                 % n_arg)
+				direct_name = arg
+				direct_arg = columns[arg]
+				if err is True:
+					err_arg = "Error_%s" % arg
+					if err_arg in columns:
+						direct_err = columns[err_arg]
+			else:
+				assert(is_direct_column(arg))
+				direct_name = arg.name if is_series(arg) else "<%s>" % n_arg
+				direct_arg = arg
+
+			# then process the explicit error column
+			if is_symbolic_column(err):
+				if columns is None:
+					raise ValueError("plotfit: symbolic columns (in `%s`) only allowed if 'columns' are provided"
+					                 % n_err)
+				direct_err = columns[err]
+			elif is_direct_column(err):
+				direct_err = err
+			else:
+				assert(err is None or err is True)
+				pass
+
+			direct_b_arg += [ direct_arg ]
+			direct_b_err += [ direct_err ]
+			direct_b_name += [ direct_name ]
+
+		direct_args += [ direct_b_arg ]
+		direct_errs += [ direct_b_err ]
+		direct_names += [ direct_b_name ]
+
+	return direct_args, direct_errs, direct_names
+
+# fits `y` against `x` using `model`, storing results to `data`, and plots the dataset
+# together with the fitted curve.
+#
+# This function supports a multitude of input formats; for details see in-line
+# comments below.
+#
+# Fitting, plotting the dataset and plotting the curve can be disabled by passing None
+# to @fit_args, @plot1_args or @plot2_args respectively (the default is an empty dict).
+# If @model is None, then fitting is skipped as well.
+#
+# Takes:
+# - @title (str),
+#   @xlabel (str),
+#   @ylabel (str),
+#   @axis (list of 4 numbers or None): convenience arguments for setting up a plot
+# - @model (callable or None): a callable object representing the curve: `model(x, parameters...) -> y`
+# - @x, @y (pd.Series or str or iterable of varlist rows or sequence thereof): the data columns
+# - @xerr, @yerr (as in @x/@y or True or None or sequence thereof): the corresponding error columns
+# - @data ("varlist" pd.DataFrame): an object to store results to
+# - @columns ("columns" pd.DataFrame or sequence thereof): the data source for input columns
+# - @label (str or sequence thereof): a label for the plot legend
+# - @fit_args (dict or None): additional keyword arguments to ll.fit2()
+# - @plot1_args (dict or None): additional keyword arguments to plt.errorbar() when plotting experimental data
+# - @plot2_args (dict or None): additional keyword arguments to plt.plot() when plotting fitted curves
+# - @linspace_args (dict): additional keyword arguments to ll.linspace()
+#
+# Returns:
+# - list of input model callable with substituted arguments
+def plotfit(*,
+            title, xlabel, ylabel, model = None, axis = [None, None, None, None],
+            x, xerr = True, y, yerr = True, data, columns = None, label = None,
+            fit_args = {}, plot1_args = {}, plot2_args = {}, linspace_args = {}):
+	#
+	# We support more than one form of input:
+	# - "synthesized columns": using sequences of individual variables, potentially from
+	#   different experiments, to form a column
+	#   - each of x, y can be
+	#     - a sequence of Series (pandas.Series) containing Value and Error in index
+	#   - Example:
+	#
+	#     plotfit(x = [data[e].loc["T"] for e in experiments],
+	#             y = [data[e].loc["phi"] for e in experiments])
+	#
+	# - "symbolic columns": using names to select columns from a single DataFrame
+	#   - each of x, y, xerr, yerr can be
+	#     - a string (str) that is interpreted as a column name
+	#   - columns is
+	#     - a DataFrame (pandas.DataFrame) with named columns
+	#   - Example:
+	#
+	#     plotfit(x = "T",
+	#             y = "phi",
+	#             columns = columns[e][5:10])
+	#
+	# - "legacy": passing columns (or plain sequences of numbers) directly
+	#             this is the most flexible but the most verbose method
+	#   - each of x, y, xerr, yerr can be
+	#     - a sequence of values
+	#   - Example:
+	#
+	#     plotfit(x = columns[e]["T"][5:10],
+	#             xerr = columns[e]["Error_T"][5:10],
+	#             y = columns[e]["phi_1"][5:10],
+	#             yerr = [phi_1 * 0.001 for phi_1 in columns[e]["phi_1"][5:10]])
+	#
+	# All these forms of input can be additionally "batched".
+	# Each data argument above additionally accepts a sequence of valid input objects,
+	# called a "batch". All batches must have the same length (that is, it is incorrect
+	# to pass two `x` columns and three `y` columns).
+	# Example:
+	#
+	#     plotfit(x = [columns[e]["T"] for e in experiments],
+	#             y = [columns[e]["phi_1"] for e in experiments])
+	#
+	#     plotfit(x = "T",
+	#             y = "phi_1",
+	#             columns = [columns[e] for e in experiments])
+	#
+	# Mixing batches and non-batches is allowed. In this case each non-batched argument
+	# will be replicated. For example, you can use a single error column for a batch
+	# of curves, or plot multiple `y` columns against the same `x` column:
+	#
+	#     plotfit(x = "T",
+	#             y = ["phi_1", "phi_2"],
+	#             columns = columns[e])
+	#
+	# Additionally, the following input parameters are per-curve and thus can be batched as well:
+	# - @columns
+	# - @label
+	#
+	# Finally, each error column can be:
+	# - None, in which case zero errors are assumed for each corresponding data column, or
+	# - True, in which case the default error column is assumed for each corresponding data column.
+
+	#
+	# First, normalize input data. Begin with detecting batches and replicating non-batched input.
+	#
+
+	# Note the renaming: we'd rather use bare words as iteration variables
+	(b_x,
+	 b_y,
+	 b_xerr,
+	 b_yerr,
+	 b_columns,
+	 b_data,
+	 b_label) = plotfit_normalize_batch(("x", x, is_valid_input),
+	                                    ("y", y, is_valid_input),
+	                                    ("xerr", xerr, is_valid_input_err),
+	                                    ("yerr", yerr, is_valid_input_err),
+	                                    ("columns", columns, is_valid_columns),
+	                                    ("data", data, is_valid_data),
+	                                    ("label", label, is_valid_label))
+	batch_size = len(b_x)
+
+	#
+	# Now convert arguments to direct form.
+	#
+
+	((b_x, b_y),
+	 (b_xerr, b_yerr),
+	 (b_x_name, b_y_name)) = plotfit_normalize_form(b_columns,
+	                                                ("x", b_x, "xerr", b_xerr),
+	                                                ("y", b_y, "yerr", b_yerr))
+
+	#
+	# Now do the fitting.
+	#
+
+	if model is not None and fit_args is not None:
+		b_model = []
+		for (x, y,
+		     xerr, yerr,
+		     x_name, y_name,
+		     data, label) in zip(b_x, b_y,
+			                 b_xerr, b_yerr,
+			                 b_x_name, b_y_name,
+			                 b_data, b_label):
+			fit_name = "%s = f(%s)" % (y_name, x_name)
+			if label is not None:
+				fit_name += " [label = %s]" % label
+			fit_model = fit2(name = fit_name, model = model,
+			                 x = x, y = y, xerr = xerr, yerr = yerr,
+			                 data = data, **fit_args)
+			b_model += [ fit_model ]
+	else:
+		b_model = None
+
+	#
+	# Now do the drawing.
+	# First draw the experimental dataset, then (if not disabled) perform
+	# fitting and draw the curves.
+	#
+
+	plt.title(title)
+	plt.xlabel(xlabel)
+	plt.ylabel(ylabel)
+
+	if plot1_args is not None:
+		has_labels = False
+		for (x, y,
+		     xerr, yerr,
+		     data, label) in zip(b_x, b_y,
+		                         b_xerr, b_yerr,
+		                         b_data, b_label):
+			if label is not None:
+				has_labels = True
+			plt.errorbar(x = x, y = y, xerr = xerr, yerr = yerr, label = label,
+			             linestyle = "none", marker = ".", **plot1_args)
+
+		# if we are plotting a batch, reset colors so that fitted curves will match their data points.
+		# otherwise, it is better to have them in different colors.
+		if batch_size > 1:
+			plt.gca().set_prop_cycle(None)
+
+	if b_model is not None and fit2_args is not None:
+		for (x, fit_model, label) in zip(b_x, b_model, b_label):
+			if label is not None:
+				label = "Fit for %s" % label
+			fit_linspace = linspace(x, **linspace_args)
+			plt.plot(fit_linspace, fit_model(fit_linspace), label = label,
+			         **plot2_args)
+
+	if has_labels:
+		plt.legend(loc = "best")
+	plt.axis(axis)
+	return b_model
+
 #
 # Utility functions
 #
@@ -527,6 +832,79 @@ def is_number(arg):
 		return True
 	except:
 		return False
+
+# is_iter(): checks if @arg is an iterable.
+def is_iter(arg, check0 = None):
+	try:
+		if not isinstance(arg, collections.abc.Iterable):
+			return False
+		if check0 is not None:
+			for obj in arg:
+				return check0(obj)
+		return True
+	except:
+		return False
+
+# is_str(): checks if @arg is a string.
+def is_str(arg):
+	return isinstance(arg, str)
+
+# is_series(): checks if @arg is a pd.Series.
+def is_series(arg):
+	return isinstance(arg, pd.Series)
+
+# is_dataframe(): checks if @arg is a pd.DataFrame.
+def is_dataframe(arg):
+	return isinstance(arg, pd.DataFrame)
+
+# is_var(): checks if @arg is a row of "varlist" pd.DataFrame.
+def is_var(arg):
+	return (is_series(arg) and
+	        "Value" in arg and
+	        "Error" in arg)
+
+# plotfit() implementation detail: checks if @arg is a valid synthesized column specification.
+def is_synthesized_column(arg):
+	return is_iter(arg, check0 = is_var)
+
+# plotfit() implementation detail: checks if @arg is a valid symbolic column specification.
+def is_symbolic_column(arg):
+	return isinstance(arg, str)
+
+# plotfit() implementation detail: checks if @arg is a valid direct column specification.
+def is_direct_column(arg):
+	return is_iter(arg, check0 = is_number)
+
+# plotfit() implementation detail: checks if @arg is a valid data column input.
+def is_valid_input(arg):
+	return (is_synthesized_column(arg) or
+	        is_symbolic_column(arg) or
+	        is_direct_column(arg))
+
+# plotfit() implementation detail: checks if @arg is a valid error column input.
+def is_valid_input_err(arg):
+	return (arg is None or
+	        arg is True or
+	        # no synthesized columns
+	        is_symbolic_column(arg) or
+	        is_direct_column(arg))
+
+# plotfit() implementation detail: checks if @arg is a valid "columns" pd.DataFrame object.
+def is_valid_columns(arg):
+	return (arg is None or
+	        is_dataframe(arg))
+
+# plotfit() implementation detail: checks if @arg is a valid "varlist" pd.DataFrame object.
+def is_valid_data(arg):
+	return (is_dataframe(arg) and
+	        "Value" in arg and
+	        "Error" in arg)
+
+# plotfit() implementation detail: checks if @arg is a valid dataset label.
+def is_valid_label(arg):
+	return (arg is None or
+	        is_str(arg))
+
 #
 # General form expression computation with errors (uncertainties).
 #
