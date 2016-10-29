@@ -533,7 +533,7 @@ def plotfit_normalize_batch(*args):
 	batch_args = []
 	for (name, arg, checker), is_single in zip(args, batch_is_single):
 		if is_single:
-			if batch_length > 1 and (name == "data" or name == "label"):
+			if batch_length > 1 and arg is not None and (name == "data" or name == "label"):
 				print("plotfit: Warning: `%s` is not a batch -- this is probably not what you want" % name)
 			batch_args += [ [arg] * batch_length ]
 		else:
@@ -620,21 +620,110 @@ def plotfit_normalize_form(columns, *args):
 # This function supports a multitude of input formats; for details see in-line
 # comments below.
 #
-# Fitting, plotting the dataset and plotting the curve can be disabled by passing None
-# to @fit_args, @plot1_args or @plot2_args respectively (the default is an empty dict).
-# If @model is None, then fitting is skipped as well.
+# Arguments @title, @xlabel, @ylabel and @axis translate into corresponding
+# plt.xxx() calls and exist for convenience. If not specified or None, the
+# corresponding calls are skipped.
+#
+# The @x, @y, @xerr and @yerr parameters specify data and error columns.
+# They can be expressed in multiple forms:
+# - "synthesized columns": a column is formed using sequences of individual
+#   variables (varlist rows)
+#   - each of @x, @y can be
+#     - a sequence of pd.Series containing Value and Error in index
+#   - Example:
+#
+#     plotfit(x = [data[e].loc["T"] for e in experiments],
+#             y = [data[e].loc["phi"] for e in experiments])
+#
+# - "symbolic columns": a column is selected by name from the @columns pd.DataFrame
+#   - each of @x, @y, @xerr, @yerr can be
+#     - a string (str) that is interpreted as a column name
+#   - @columns is
+#     - a "columns" pd.DataFrame
+#   - Example:
+#
+#     plotfit(x = "T",
+#             y = "phi",
+#             columns = columns[e][5:10])
+#
+# - "legacy": a column is passed directly as a sequence of values
+#   - each of @x, @y, @xerr, @yerr can be
+#     - a sequence of values of any form
+#   - Example:
+#
+#     plotfit(x = columns[e]["T"][5:10],
+#             xerr = columns[e]["Error_T"][5:10],
+#             y = columns[e]["phi_1"][5:10],
+#             yerr = [phi_1 * 0.001 for phi_1 in columns[e]["phi_1"][5:10]])
+#
+# The error columns (@xerr and @yerr) can also be specified as:
+# - None, in which case zero errors are assumed;
+# - True, in which case the errors are inferred from the data column specification:
+#   - if the data column is specified symbolically as "foo", the error column
+#     is taken to be "Error_foo";
+#   - if the data column is specified as a sequence of varlist rows, the errors
+#     are extracted from these rows (which is the suggested mode of operation).
+#
+# If the symbolic form is used, the @columns argument must be a "columns" pd.DataFrame
+# holding the actual dataset. Otherwise it can be omitted or None.
+#
+# Furthermore, the @fit_columns argument overrides @columns for purposes of fitting.
+# This feature can be used to fit against a "good" subset of experimental data
+# while plotting both bad and good data. If not specified or None, this feature
+# is disabled.
+#
+# Finally, the @label argument sets the label of this dataset and the corresponding
+# curve on the plot legend. If not specified or None, the dataset is not added
+# to the legend.
+#
+# Each data argument above (@x, @y, @xerr, @yerr, @columns, @fit_columns, @label)
+# additionally can accept a sequence of above-described values, called a "batch".
+# All batches must have the same length (that is, it is incorrect to pass two
+# @x columns and three @y columns).
+# Example:
+#
+#     plotfit(x = [columns[e]["T"] for e in experiments],
+#             y = [columns[e]["phi_1"] for e in experiments])
+#
+#     plotfit(x = "T",
+#             y = "phi_1",
+#             columns = [columns[e] for e in experiments])
+#
+# Mixing batches and non-batches is allowed. In this case each non-batched argument
+# will be replicated. For example, you can use a single error column for a batch
+# of curves, or plot multiple @y columns against the same @x column:
+#
+#     plotfit(x = "T",
+#             y = ["phi_1", "phi_2"],
+#             columns = columns[e])
+#
+# The @model argument must be a callable (function or lambda) where the first
+# argument is the model argument ("x") and the remaining arguments are model parameters.
+# The model parameter names are significant. If not specified or None, fitting and
+# curve plotting steps are skipped.
+#
+# Correspondingly, the @data argument must be a "varlist" pd.DataFrame. It is used
+# to store the results of the fitting step. Found parameter values are stored with
+# their names as in Python source! If not specified or None, fitting and curve
+# plotting steps are skipped.
+#
+# The arguments @fit_args, @plot1_args, @plot2_args and @linspace_args can be used
+# to provide additional arguments to back-end fitting and plotting functions.
+# If not specified, they default to an empty dict. NB: if explicitly set to None,
+# the corresponding steps are skipped!
 #
 # Takes:
-# - @title (str),
-#   @xlabel (str),
-#   @ylabel (str),
+# - @title (str or None),
+#   @xlabel (str or None),
+#   @ylabel (str or None),
 #   @axis (list of 4 numbers or None): convenience arguments for setting up a plot
 # - @model (callable or None): a callable object representing the curve: `model(x, parameters...) -> y`
 # - @x, @y (pd.Series or str or iterable of varlist rows or sequence thereof): the data columns
 # - @xerr, @yerr (as in @x/@y or True or None or sequence thereof): the corresponding error columns
-# - @data ("varlist" pd.DataFrame): an object to store results to
-# - @columns ("columns" pd.DataFrame or sequence thereof): the data source for input columns
-# - @label (str or sequence thereof): a label for the plot legend
+# - @data ("varlist" pd.DataFrame or None): an object to store results to
+# - @columns ("columns" pd.DataFrame or sequence thereof or None): the data source for input columns
+# - @fit_columns ("columns" pd.DataFrame or sequence thereof or None): alternative @columns (probably subset) to use for fitting
+# - @label (str or sequence thereof or None): a label for the plot legend
 # - @fit_args (dict or None): additional keyword arguments to ll.fit2()
 # - @plot1_args (dict or None): additional keyword arguments to plt.errorbar() when plotting experimental data
 # - @plot2_args (dict or None): additional keyword arguments to plt.plot() when plotting fitted curves
@@ -643,112 +732,75 @@ def plotfit_normalize_form(columns, *args):
 # Returns:
 # - list of input model callable with substituted arguments
 def plotfit(*,
-            title, xlabel, ylabel, model = None, axis = [None, None, None, None],
-            x, xerr = True, y, yerr = True, data, columns = None, label = None,
+            title = None, xlabel = None, ylabel = None, model = None, axis = [None, None, None, None],
+            x, xerr = True, y, yerr = True, data = None, columns = None, fit_columns = None, label = None,
             fit_args = {}, plot1_args = {}, plot2_args = {}, linspace_args = {}):
-	#
-	# We support more than one form of input:
-	# - "synthesized columns": using sequences of individual variables, potentially from
-	#   different experiments, to form a column
-	#   - each of x, y can be
-	#     - a sequence of Series (pandas.Series) containing Value and Error in index
-	#   - Example:
-	#
-	#     plotfit(x = [data[e].loc["T"] for e in experiments],
-	#             y = [data[e].loc["phi"] for e in experiments])
-	#
-	# - "symbolic columns": using names to select columns from a single DataFrame
-	#   - each of x, y, xerr, yerr can be
-	#     - a string (str) that is interpreted as a column name
-	#   - columns is
-	#     - a DataFrame (pandas.DataFrame) with named columns
-	#   - Example:
-	#
-	#     plotfit(x = "T",
-	#             y = "phi",
-	#             columns = columns[e][5:10])
-	#
-	# - "legacy": passing columns (or plain sequences of numbers) directly
-	#             this is the most flexible but the most verbose method
-	#   - each of x, y, xerr, yerr can be
-	#     - a sequence of values
-	#   - Example:
-	#
-	#     plotfit(x = columns[e]["T"][5:10],
-	#             xerr = columns[e]["Error_T"][5:10],
-	#             y = columns[e]["phi_1"][5:10],
-	#             yerr = [phi_1 * 0.001 for phi_1 in columns[e]["phi_1"][5:10]])
-	#
-	# All these forms of input can be additionally "batched".
-	# Each data argument above additionally accepts a sequence of valid input objects,
-	# called a "batch". All batches must have the same length (that is, it is incorrect
-	# to pass two `x` columns and three `y` columns).
-	# Example:
-	#
-	#     plotfit(x = [columns[e]["T"] for e in experiments],
-	#             y = [columns[e]["phi_1"] for e in experiments])
-	#
-	#     plotfit(x = "T",
-	#             y = "phi_1",
-	#             columns = [columns[e] for e in experiments])
-	#
-	# Mixing batches and non-batches is allowed. In this case each non-batched argument
-	# will be replicated. For example, you can use a single error column for a batch
-	# of curves, or plot multiple `y` columns against the same `x` column:
-	#
-	#     plotfit(x = "T",
-	#             y = ["phi_1", "phi_2"],
-	#             columns = columns[e])
-	#
-	# Additionally, the following input parameters are per-curve and thus can be batched as well:
-	# - @columns
-	# - @label
-	#
-	# Finally, each error column can be:
-	# - None, in which case zero errors are assumed for each corresponding data column, or
-	# - True, in which case the default error column is assumed for each corresponding data column.
+
+	have_fit_columns = (fit_columns is not None and fit_columns is not columns)
 
 	#
 	# First, normalize input data. Begin with detecting batches and replicating non-batched input.
 	#
 
 	# Note the renaming: we'd rather use bare words as iteration variables
-	(b_x,
-	 b_y,
-	 b_xerr,
-	 b_yerr,
+	(o_x,
+	 o_y,
+	 o_xerr,
+	 o_yerr,
 	 b_columns,
+	 b_fit_columns,
 	 b_data,
 	 b_label) = plotfit_normalize_batch(("x", x, is_valid_input),
 	                                    ("y", y, is_valid_input),
 	                                    ("xerr", xerr, is_valid_input_err),
 	                                    ("yerr", yerr, is_valid_input_err),
 	                                    ("columns", columns, is_valid_columns),
+	                                    ("fit_columns", fit_columns, is_valid_columns),
 	                                    ("data", data, is_valid_data),
 	                                    ("label", label, is_valid_label))
-	batch_size = len(b_x)
+	batch_size = len(o_x)
 
 	#
 	# Now convert arguments to direct form.
 	#
 
+	# first for normal b_columns...
 	((b_x, b_y),
 	 (b_xerr, b_yerr),
 	 (b_x_name, b_y_name)) = plotfit_normalize_form(b_columns,
-	                                                ("x", b_x, "xerr", b_xerr),
-	                                                ("y", b_y, "yerr", b_yerr))
+	                                                ("x", o_x, "xerr", o_xerr),
+	                                                ("y", o_y, "yerr", o_yerr))
+
+	# ...then for b_fit_columns (defaulting to b_columns)
+	if have_fit_columns:
+		b_fit_columns = [ f_c if f_c is not None else c
+		                  for c, f_c in zip(b_columns, b_fit_columns) ]
+
+		((b_fit_x, b_fit_y),
+		 (b_fit_xerr, b_fit_yerr),
+		 _                   ) = plotfit_normalize_form(b_fit_columns,
+		                                                ("x", o_x, "xerr", o_xerr),
+		                                                ("y", o_y, "yerr", o_yerr))
+	else:
+		(b_fit_x,
+		 b_fit_y,
+		 b_fit_xerr,
+		 b_fit_yerr) = (b_x,
+		                 b_y,
+		                 b_xerr,
+		                 b_yerr)
 
 	#
 	# Now do the fitting.
 	#
 
-	if model is not None and fit_args is not None:
+	if model is not None and data is not None and fit_args is not None:
 		b_model = []
 		for (x, y,
 		     xerr, yerr,
 		     x_name, y_name,
-		     data, label) in zip(b_x, b_y,
-			                 b_xerr, b_yerr,
+		     data, label) in zip(b_fit_x, b_fit_y,
+			                 b_fit_xerr, b_fit_yerr,
 			                 b_x_name, b_y_name,
 			                 b_data, b_label):
 			fit_name = "%s = f(%s)" % (y_name, x_name)
@@ -767,31 +819,71 @@ def plotfit(*,
 	# fitting and draw the curves.
 	#
 
-	plt.title(title)
-	plt.xlabel(xlabel)
-	plt.ylabel(ylabel)
+	if title is not None:
+		plt.title(title)
+	if xlabel is not None:
+		plt.xlabel(xlabel)
+	if ylabel is not None:
+		plt.ylabel(ylabel)
 
+	# if full dataset != fit dataset, then plot the full dataset in reduced intensity
+	if plot1_args is not None and have_fit_columns:
+		plot1_dfl_args = {
+		    "linestyle": "None",
+		    "marker": ".",
+		    "alpha": 0.5,
+		    "markersize": 0.5,
+		    "linewidth": 0.5,
+		    "markeredgewidth": 0.5,
+		}
+		plot1_dfl_args.update(plot1_args)
+
+		for (x, y,
+		     xerr, yerr) in zip(b_x, b_y,
+		                        b_xerr, b_yerr):
+			# no need to have another legend entry for the dim-colored
+			# points, they are in the same color as the fit dataset
+			plt.errorbar(x = x, y = y, xerr = xerr, yerr = yerr, label = None,
+			             **plot1_dfl_args)
+
+		# mandatorily reset colors so that parts of the same dataset
+		# are plotted in the same color
+		plt.gca().set_prop_cycle(None)
+
+	# then, plot the fit dataset in full intensity
 	if plot1_args is not None:
+		plot1_dfl_args = {
+		    "linestyle": "None",
+		    "marker": ".",
+		}
+		plot1_dfl_args.update(plot1_args)
+
 		has_labels = False
 		for (x, y,
 		     xerr, yerr,
-		     data, label) in zip(b_x, b_y,
-		                         b_xerr, b_yerr,
-		                         b_data, b_label):
+		     label) in zip(b_fit_x, b_fit_y,
+		                   b_fit_xerr, b_fit_yerr,
+		                   b_label):
 			if label is not None:
 				has_labels = True
 			plt.errorbar(x = x, y = y, xerr = xerr, yerr = yerr, label = label,
-			             linestyle = "none", marker = ".", **plot1_args)
+			             **plot1_dfl_args)
 
-		# if we are plotting a batch, reset colors so that fitted curves will match their data points.
-		# otherwise, it is better to have them in different colors.
+		# if we are plotting a batch, reset colors again so that fitted curves
+		# will match their data points.  otherwise, it is better to have them
+		# in different colors.
 		if batch_size > 1:
 			plt.gca().set_prop_cycle(None)
 
-	if b_model is not None and fit2_args is not None:
+	if b_model is not None and plot2_args is not None:
 		for (x, fit_model, label) in zip(b_x, b_model, b_label):
-			if label is not None:
-				label = "Fit for %s" % label
+			if batch_size > 1:
+				# no need to have another legend entry for the fitted curve,
+				# it's in the same color as the dataset
+				label = None
+			else:
+				if label is not None:
+					label = "Fit for %s" % label
 			fit_linspace = linspace(x, **linspace_args)
 			plt.plot(fit_linspace, fit_model(fit_linspace), label = label,
 			         **plot2_args)
@@ -897,9 +989,10 @@ def is_valid_columns(arg):
 
 # plotfit() implementation detail: checks if @arg is a valid "varlist" pd.DataFrame object.
 def is_valid_data(arg):
-	return (is_dataframe(arg) and
-	        "Value" in arg and
-	        "Error" in arg)
+	return (arg is None or
+	        (is_dataframe(arg) and
+	         "Value" in arg and
+	         "Error" in arg))
 
 # plotfit() implementation detail: checks if @arg is a valid dataset label.
 def is_valid_label(arg):
