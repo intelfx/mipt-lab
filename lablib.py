@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+import math as m
 from scipy import optimize as sp_opt
 from scipy import odr as sp_odr
 from IPython.display import display as disp
@@ -71,6 +72,7 @@ k = 1.3806485279 * 10**(-23) # J/K
 torr = 133.3224 # Pa
 R = 8.314472
 at = 98066.5 # Pa
+mu_0 = 4 * m.pi * 10**-7 # N/A^2
 
 
 #
