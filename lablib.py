@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 import inspect
 import os
 import collections
+import sys
 
 #
 # Use `natsort` module, if present, to sort experiment names
@@ -30,19 +31,36 @@ except ImportError:
 # Using a wrapper allows to use the same lambda both to compute a column with errors and to plot a fitted curve.
 #
 
-# TODO: generalize math wrappers
-def exp(x):
-	if type(x).__module__.split(".")[0] == "sympy":
-		return smp.exp(x)
-	else:
-		return np.exp(x)
+class LablibWrappers:
+	def __init__(self, wrapped):
+		self.wrapped = wrapped
 
-def log(x):
-	if type(x).__module__.split(".")[0] == "sympy":
-		return smp.log(x)
-	else:
-		return np.log(x)
+	def __getattr__(self, name):
+		# first try real attributes
+		try:
+			return getattr(self.wrapped, name)
+		except AttributeError as e:
+			real_exception = e
 
+		# try to wrap a sympy/numpy method
+		try:
+			smp_func = getattr(smp, name)
+			np_func = getattr(np, name)
+			wrapper = lambda x: smp_func(x) \
+			                    if type(x).__module__.split(".")[0] == "sympy" \
+			                    else np_func(x)
+
+			# a bit of caching
+			self.__dict__[name] = wrapper
+			return wrapper
+		except AttributeError:
+			pass
+
+		# finally, re-raise real exception to tell user that lablib has no such attribute
+		raise real_exception
+
+# replace our module with a class that allows us to do a __getattr__() on it
+sys.modules[__name__] = LablibWrappers(sys.modules[__name__])
 
 #
 # Physical constants
