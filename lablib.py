@@ -323,7 +323,10 @@ def read_csv(name):
 			csv.index.set_names(None, inplace = True)
 
 		# compute ErrorRel for a varlist
-		csv["ErrorRel"] = csv["Error"] / csv["Value"]
+		try:
+			csv["ErrorRel"] = csv["Error"] / csv["Value"]
+		except:
+			pass
 		# set percentage format for the ErrorRel
 		__set_formatters(csv, __varlist_formatters)
 	else:
@@ -337,15 +340,19 @@ def read_csv(name):
 			var_col = err_col[6:]
 			if not var_col in csv.columns:
 				continue
-			relerr_col = "ErrorRel_%s" % var_col
 
-			# insert the new column after the error column
-			csv.insert(list(csv.columns).index(err_col) + 1,
-			           relerr_col,
-			           csv[err_col] / csv[var_col])
+			try:
+				relerr_col = "ErrorRel_%s" % var_col
+				relerr = csv[err_col] / csv[var_col]
+				# insert the new column after the error column
+				csv.insert(list(csv.columns).index(err_col) + 1,
+				           relerr_col,
+				           relerr)
+				# save its name
+				relerr_cols.append(relerr_col)
+			except:
+				pass
 
-			# save its name
-			relerr_cols.append(relerr_col)
 
 		# set percentage format for all these columns
 		__set_formatters(csv, { k: __varlist_formatters["ErrorRel"]
@@ -1367,5 +1374,28 @@ def compute(name, expr, data, columns = None, aux = None, debug = False, expr_ar
 		add(data, expr_out)
 
 	return expr, expr_vars, expr_err_vars
+
+# Apply a function to multiple columns or single variables in-place.
+def convert(names, expr, data = None, columns = None):
+	for n in names:
+		err_n = "Error_%s" % n
+
+		if n in data.Value:
+			add(data,
+			    var(n,
+			        expr(data.Value[n]),
+			        expr(data.Error[n])))
+
+		elif n in columns and err_n in columns:
+			add_column(columns,
+			           name = n,
+			           values = [ expr(v) for v in columns[n] ],
+			           errors = [ expr(v) for v in columns[err_n] ])
+
+		elif n in columns:
+			columns[n] = [ expr(v) for v in columns[n] ]
+
+		else:
+			raise IndexError("Variable %s does not exist in dataset" % n)
 
 #  vim: set ts=8 sw=8 tw=0 noet ft=python :
